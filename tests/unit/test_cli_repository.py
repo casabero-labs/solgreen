@@ -229,3 +229,51 @@ def test_cli_import_align_with_db_persists_episodes(tmp_path: Path) -> None:
     assert "persisted to database" in result.output
     assert len(mock_repo.batches) == 2
     assert len(mock_repo.samples) >= 1
+
+
+def test_cli_import_align_with_llm_provider(tmp_path: Path) -> None:
+    mock_repo = MockRepository()
+
+    class DummyProvider:
+        provider_name = "dummy"
+        default_model = "dummy-v1"
+
+        def complete(self, prompt: str, *, max_tokens: int = 2000) -> str:
+            import json
+            return json.dumps({
+                "summary": "Test LLM summary.",
+                "hypotheses": [],
+                "alternatives": [],
+                "missing_info": [],
+                "suggested_actions": [],
+                "warnings": [],
+            })
+
+    dummy = DummyProvider()
+    with (
+        patch("solgreen.cli._build_repository", return_value=mock_repo),
+        patch("solgreen.cli._build_llm_provider", return_value=dummy),
+    ):
+        result = runner.invoke(
+            app,
+            [
+                "import",
+                "-f",
+                str(FIXTURES_DIR / "flow_small.csv"),
+                "--align-with",
+                str(FIXTURES_DIR / "telemetry_small.csv"),
+                "-o",
+                str(tmp_path),
+                "--plant-id",
+                "casabero",
+                "--db-url",
+                "postgresql://test@localhost/test",
+                "--llm-provider",
+                "dummy",
+                "--llm-api-key",
+                "test-key",
+            ],
+        )
+    assert result.exit_code == 0, result.output
+    assert "LLM provider: dummy" in result.output
+    assert "LLM:" in result.output
