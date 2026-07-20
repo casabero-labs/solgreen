@@ -390,6 +390,103 @@ def _parse_iso_duration(iso: str) -> float:
     return td.total_seconds()
 
 
+@app.command("deploy-schema")
+def deploy_schema(
+    db_url: Annotated[
+        str | None,
+        typer.Option(
+            "--db-url",
+            envvar="SOLGREEN_DATABASE_URL",
+            help="PostgreSQL connection URL.",
+        ),
+    ] = None,
+    dry_run: Annotated[
+        bool,
+        typer.Option("--dry-run", help="Print SQL without executing."),
+    ] = False,
+) -> None:
+    if db_url is None:
+        raise typer.BadParameter("--db-url required or set SOLGREEN_DATABASE_URL")
+    from pathlib import Path as _Path
+
+    migration_path = _Path(__file__).parent / "db" / "migrations" / "001_initial.sql"
+    sql = migration_path.read_text(encoding="utf-8")
+    if dry_run:
+        typer.echo(sql)
+        return
+    conn = get_connection(db_url)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(sql)
+        conn.commit()
+        typer.echo("Schema deployed successfully.")
+    finally:
+        conn.close()
+
+
+@app.command("health-check")
+def health_check(
+    db_url: Annotated[
+        str | None,
+        typer.Option(
+            "--db-url",
+            envvar="SOLGREEN_DATABASE_URL",
+            help="PostgreSQL connection URL.",
+        ),
+    ] = None,
+    check_llm: Annotated[
+        bool,
+        typer.Option("--check-llm", help="Also verify LLM provider connectivity."),
+    ] = False,
+    llm_provider_name: Annotated[
+        str | None,
+        typer.Option("--llm-provider", envvar="SOLGREEN_LLM_PROVIDER"),
+    ] = None,
+    llm_api_key: Annotated[
+        str | None,
+        typer.Option("--llm-api-key", envvar="SOLGREEN_LLM_API_KEY"),
+    ] = None,
+) -> None:
+    ok = True
+
+    if db_url is not None:
+        try:
+            conn = get_connection(db_url)
+            with conn.cursor() as cur:
+                cur.execute("SELECT 1")
+                result = cur.fetchone()
+            conn.close()
+            if result == (1,):
+                typer.echo("DB: OK")
+            else:
+                typer.echo("DB: UNEXPECTED response")
+                ok = False
+        except Exception as exc:
+            typer.echo(f"DB: FAILED ({exc})")
+            ok = False
+    else:
+        typer.echo("DB: SKIPPED (no --db-url)")
+
+    if check_llm:
+        provider = _build_llm_provider(llm_provider_name, None, llm_api_key)
+        if provider is None:
+            typer.echo("LLM: SKIPPED (no provider)")
+        else:
+            try:
+                response = provider.complete("Say 'ok' in one word.", max_tokens=10)
+                if response.strip():
+                    typer.echo(f"LLM: OK ({provider.provider_name})")
+                else:
+                    typer.echo("LLM: EMPTY response")
+                    ok = False
+            except Exception as exc:
+                typer.echo(f"LLM: FAILED ({exc})")
+                ok = False
+
+    if not ok:
+        raise typer.Exit(code=1)
+
+
 def main() -> None:
     app()
 
