@@ -104,7 +104,16 @@ jobs:
           retention-days: 7
 
       - name: Type check
-        run: uv run mypy solgreen
+        run: uv run mypy solgreen --no-color-output > mypy-report.txt
+
+      - name: Upload mypy diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mypy-report
+          path: mypy-report.txt
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Tests with coverage
         run: uv run pytest --cov=solgreen --cov-fail-under=80
