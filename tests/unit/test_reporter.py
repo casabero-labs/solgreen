@@ -1,5 +1,5 @@
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from io import StringIO
 from pathlib import Path
 
@@ -8,14 +8,18 @@ from solgreen.contracts.plant_flow import PlantFlowSample
 from solgreen.importer.parsers.solarman_flow import parse_plant_flow
 from solgreen.importer.parsers.solarman_telemetry import parse_inverter_telemetry
 from solgreen.importer.reporter import (
+    _TimelineSummaryForReport,
     _validity_summary,
     build_import_batch,
     summarize_flow,
     summarize_telemetry,
     write_report_json,
     write_report_markdown,
+    write_timeline_json,
+    write_timeline_markdown,
 )
 from solgreen.quality import analyze_plant_flow, analyze_telemetry
+from solgreen.timeline import CanonicalSample
 
 
 def test_build_import_batch_uses_real_sha_and_size() -> None:
@@ -182,3 +186,59 @@ def test_write_report_markdown_includes_quality_score(tmp_path: Path) -> None:
     assert "Quality score:" in text
     assert "Ordered:" in text
     assert "Strict (no duplicates):" in text
+
+
+def test_write_timeline_json_produces_valid_payload(tmp_path: Path) -> None:
+    ts = datetime(2026, 7, 17, 12, 0, tzinfo=UTC)
+    samples = [
+        CanonicalSample(
+            timestamp_axis=ts,
+            source="merged",
+            time_delta=None,
+            flow_potencia_produccion_w=5000.0,
+            flow_potencia_consumo_w=1000.0,
+            flow_grid_w=4000.0,
+            flow_soc_pct=None,
+            flow_battery_w=None,
+            telemetry_pv_power_w=4900.0,
+            telemetry_grid_power_w=4100.0,
+            telemetry_battery_power_w=0.0,
+            telemetry_soc_pct=80.0,
+            telemetry_inverter_state="producing",
+            quality_level="measured",
+            confidence=0.95,
+        ),
+    ]
+    summary = _TimelineSummaryForReport(
+        total_samples=1,
+        merged_count=1,
+        flow_only_count=0,
+        telemetry_only_count=0,
+        coverage_pct=100.0,
+    )
+    json_path = tmp_path / "timeline.json"
+    write_timeline_json(samples, summary, json_path)
+    payload = json.loads(json_path.read_text(encoding="utf-8"))
+    assert payload["summary"]["total_samples"] == 1
+    assert payload["summary"]["merged_count"] == 1
+    assert payload["summary"]["coverage_pct"] == 100.0
+    assert len(payload["timeline"]) == 1
+    assert payload["timeline"][0]["source"] == "merged"
+
+
+def test_write_timeline_markdown_produces_summary(tmp_path: Path) -> None:
+    summary = _TimelineSummaryForReport(
+        total_samples=10,
+        merged_count=6,
+        flow_only_count=2,
+        telemetry_only_count=2,
+        coverage_pct=60.0,
+    )
+    md_path = tmp_path / "timeline.md"
+    write_timeline_markdown(summary, timedelta(minutes=2, seconds=30), md_path)
+    text = md_path.read_text(encoding="utf-8")
+    assert "# Solgreen timeline alignment report" in text
+    assert "Tolerance: 0:02:30" in text
+    assert "Total canonical samples: 10" in text
+    assert "Merged (flow + telemetry): 6" in text
+    assert "Coverage: 60.0%" in text
