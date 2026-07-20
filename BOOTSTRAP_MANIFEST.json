@@ -1,0 +1,271 @@
+{
+  "project": "solgreen",
+  "generated": "2026-07-19",
+  "files": [
+    {
+      "path": ".env.example",
+      "sha256": "64f319137d8d80a893a4e17eb1be8c39ee53bd68a81525bde8c893306576e184",
+      "bytes": 565
+    },
+    {
+      "path": ".github/ISSUE_TEMPLATE/bug.md",
+      "sha256": "ab856f8e27bd322dcb8e7a0df0472bcc3f77687146f10cfeecef4348ace6b654",
+      "bytes": 194
+    },
+    {
+      "path": ".github/ISSUE_TEMPLATE/domain-rule.md",
+      "sha256": "9e88f5a6729f6930754a1d88f47f0d400b36547fed8220b39a9890f13f952afb",
+      "bytes": 297
+    },
+    {
+      "path": ".github/workflows/ci.yml",
+      "sha256": "def0a86780feb247edba8c9711cca59dd597fab225d3e57e0323df3d0ebca1f1",
+      "bytes": 614
+    },
+    {
+      "path": ".gitignore",
+      "sha256": "2422e046dff9f8da661fe4e658e680e951014b71591c1c2cdceb95de7de85b9a",
+      "bytes": 400
+    },
+    {
+      "path": "AGENTS.md",
+      "sha256": "67cf8d2054638af7e1c2c51df0b922c494df1d2c552a223f342cd02d159f57db",
+      "bytes": 1831
+    },
+    {
+      "path": "CONTRIBUTING.md",
+      "sha256": "569dc049ab960e4f079296914eba653901b96836c26745a032f7e34d33c5b315",
+      "bytes": 894
+    },
+    {
+      "path": "DEPLOYMENT.md",
+      "sha256": "0fe8d41cf56da44996acfb9a4be4ff45c71f47614de678f9f3ed987e830d5507",
+      "bytes": 784
+    },
+    {
+      "path": "DESIGN.md",
+      "sha256": "2d6e7e8750c95b82230e1bcc8ecd8f4cf7b5a5bf76773277298e2b6a57cff7ee",
+      "bytes": 797
+    },
+    {
+      "path": "README.md",
+      "sha256": "de26d73bc7481471d25f2640bd7a6aa8c1d720bf4888647b226eded78922a982",
+      "bytes": 3113
+    },
+    {
+      "path": "SECURITY.md",
+      "sha256": "9b8e7cdc3c2d825e44050fa1a32428d0e0f0971d4cab714139b0b010579c5278",
+      "bytes": 978
+    },
+    {
+      "path": "config/grid-profiles/colombia-split-phase-review-required.yaml",
+      "sha256": "c6d8e6062fa7f4844755470c11d3362c3b12cc1a68572b092fc5622a2f398b5c",
+      "bytes": 374
+    },
+    {
+      "path": "config/plant-profiles/casabero.example.yaml",
+      "sha256": "80913e3a30d7649f29bf197986957e0d5d2ab7c0fb5ef3dcb4be809d3cdb3db2",
+      "bytes": 527
+    },
+    {
+      "path": "contracts/schemas/ai-analysis.schema.json",
+      "sha256": "c0c92e075744e55521412f4dab288df6fd76c668ae6121d1482281954af396ee",
+      "bytes": 2399
+    },
+    {
+      "path": "contracts/schemas/episode.schema.json",
+      "sha256": "f95eb4d017e42ee437c6fc6139d75f4c9740d03f62969a72e20a78af3a25b7ca",
+      "bytes": 2177
+    },
+    {
+      "path": "docs/AI_LOG.md",
+      "sha256": "caf5df5ac3ae9fe93fe3b3c96e20427e8b256867b98f54ec9768e1f505a33daa",
+      "bytes": 414
+    },
+    {
+      "path": "docs/architecture/00-architecture.md",
+      "sha256": "edc805b55648c8ea501fc8cf3962d1330c99f15c97fb906d5b19e94a4cc02945",
+      "bytes": 1421
+    },
+    {
+      "path": "docs/architecture/01-data-pipeline.md",
+      "sha256": "651d2096e9747cb5c4a37716bcbc01f76db52f216a06dc90ad017b7162f379ce",
+      "bytes": 718
+    },
+    {
+      "path": "docs/architecture/02-ai-orchestration.md",
+      "sha256": "2e5621f286a8d3f80bf0d56b9cdf01701c64d361ba00644e7c75dff60e324a3b",
+      "bytes": 615
+    },
+    {
+      "path": "docs/architecture/03-visualization.md",
+      "sha256": "711f714f1fd0137fb4547a981498410aeede31b94e5f5a54c1a666ef30b21cb6",
+      "bytes": 794
+    },
+    {
+      "path": "docs/architecture/04-security-privacy.md",
+      "sha256": "ac37a90e02f65cd192329a3d76ca7d605a59f868a9397ca1d4e48134900059cc",
+      "bytes": 366
+    },
+    {
+      "path": "docs/decisions/ADR-001-deterministic-first.md",
+      "sha256": "c6771d5c16177b78ebf19fe6e3d7cac3b84a9194d5e10961eded153ba03d7159",
+      "bytes": 376
+    },
+    {
+      "path": "docs/decisions/ADR-002-originals-immutable.md",
+      "sha256": "010835164fd6863ebc76b8b04dd56be62adeb48677d206d4c5cbf3a2a79ff823",
+      "bytes": 183
+    },
+    {
+      "path": "docs/decisions/ADR-003-python-analysis-engine.md",
+      "sha256": "89f28ea00451306f45c3a5287aa3c462e5ff9263c8f96d42571bc760eb7b23b5",
+      "bytes": 186
+    },
+    {
+      "path": "docs/design/CATALOG.md",
+      "sha256": "7e7d5b2a67bc412d8a4d37cc3ffc29bb7050a625fb409f7282d1f24d5127e599",
+      "bytes": 654
+    },
+    {
+      "path": "docs/domain/DATA_CONTRACTS.md",
+      "sha256": "eb71f4cbbec5afc62ed296fd35ffb5033f7a7a2505821552b25db7196464c58d",
+      "bytes": 1421
+    },
+    {
+      "path": "docs/domain/FOUNDATIONS.md",
+      "sha256": "4dd61794771551cb8d6faff3c9551b655dfaa924cd31cb679ddb9f1dc6d99506",
+      "bytes": 2415
+    },
+    {
+      "path": "docs/domain/GLOSSARY.md",
+      "sha256": "a4be941a737d1f4c12a67ed6939c5f013de470971aa807a4953b1ae7eb14264d",
+      "bytes": 965
+    },
+    {
+      "path": "docs/domain/GOLDEN_DATASETS.md",
+      "sha256": "970b97761ab85969b9a78bfdec82b09f7da6bb4b9540273d8eef65b0a0a4c4a8",
+      "bytes": 1236
+    },
+    {
+      "path": "docs/domain/LLM_GUARDRAILS.md",
+      "sha256": "1611d9fe1ad7acaa8a1939ef7e8cd4fed895edcfac05eb72fc9a6d436cb371a5",
+      "bytes": 1018
+    },
+    {
+      "path": "docs/domain/RULE_CATALOG.md",
+      "sha256": "62ed4fe619db63ca5ddaa799ed428db4f10dd0b5c3f1b4ae779660573ed5f394",
+      "bytes": 2580
+    },
+    {
+      "path": "docs/domain/SEVERITY_CONFIDENCE.md",
+      "sha256": "318017b7e10b4e63554ed3fbcddf500bd4316dcb8d162384a4bcade894ef5347",
+      "bytes": 889
+    },
+    {
+      "path": "docs/domain/data-dictionary/solarman-inverter-telemetry.md",
+      "sha256": "c923f7bb45f930aec94f1f21f44a972222a970e4c834c5b34f5ff8feae190728",
+      "bytes": 9410
+    },
+    {
+      "path": "docs/domain/data-dictionary/solarman-plant-flow.md",
+      "sha256": "fb7c82f1c386210132bb6e2ac6515f60369625033a81f4cc22672be621b1bab9",
+      "bytes": 1973
+    },
+    {
+      "path": "docs/mcp/README.md",
+      "sha256": "75f0d95486eac07ffcffea6dbd7a51be64065deb8bdffdc5d33a90bef90263d7",
+      "bytes": 465
+    },
+    {
+      "path": "docs/operations/INCIDENT_RESPONSE.md",
+      "sha256": "e11c312e4be87c5876339ee335d390e5ee16e828ac7a1e0aa1d4a9b90d702810",
+      "bytes": 534
+    },
+    {
+      "path": "docs/operations/INSTALLER_REPORTS.md",
+      "sha256": "1f311d6e44eabca5cc0f3fa1a99e9e7a80152f28e4d3724e1e8f218925659c48",
+      "bytes": 410
+    },
+    {
+      "path": "docs/phases/LOOP_REGISTRY.md",
+      "sha256": "ebc90f9584db96265cd304f849f81f32a684d709dc236ce311d1c0fa0dc14f02",
+      "bytes": 1966
+    },
+    {
+      "path": "docs/phases/NEXT_STEPS.md",
+      "sha256": "7dc401b39b9f9262433df081a40673f8f58d2b1717af6b21d26e1cfcd3b7f8bb",
+      "bytes": 1299
+    },
+    {
+      "path": "docs/product/00-foundation-card.md",
+      "sha256": "ae197b7159d51b402de415111b451c8963c19ee3ca2f4d9925f43a9e6eac194c",
+      "bytes": 2732
+    },
+    {
+      "path": "docs/product/00-idea.md",
+      "sha256": "b46c58d71c3891707cbc33e012acdd894ad8c9ca1377147fa115ac5ed61de260",
+      "bytes": 4496
+    },
+    {
+      "path": "docs/product/01-roles-permissions.md",
+      "sha256": "59a08f97ab48993f565438703d6c3db881de1bcba7192bec029f08102bc6e631",
+      "bytes": 676
+    },
+    {
+      "path": "docs/product/02-workflows.md",
+      "sha256": "a7ca20c94184a9d3d8afc5959f570420d48c50fb10d6bac5525c73697c3baa4b",
+      "bytes": 1325
+    },
+    {
+      "path": "docs/product/03-agent-capabilities.md",
+      "sha256": "e6fd0e156e0643c9cde2774230d92f84f3e9c30ab51bfdd48a0dacd97279df20",
+      "bytes": 632
+    },
+    {
+      "path": "docs/qa_reports/TEST_PLAN.md",
+      "sha256": "fcd8f2b108d90c8d2b19fda709e0c1659946b9e657179919153af8448da5ac85",
+      "bytes": 1229
+    },
+    {
+      "path": "docs/research/ANOMALY_DETECTION.md",
+      "sha256": "9869844b08105109a37b27bd458275f883bb616a468b061053c6c261f6556581",
+      "bytes": 542
+    },
+    {
+      "path": "docs/research/BATTERY_HEALTH.md",
+      "sha256": "1e17bd45d0f0774cefca6bb338092ea97dc6914bb83b1867cef717b7e1fef31c",
+      "bytes": 573
+    },
+    {
+      "path": "docs/research/DATA_QUALITY.md",
+      "sha256": "b6ce9fbd48fee383604f3fa4c20331cb1f6323658d6ca859b6e03b1d54e44c7f",
+      "bytes": 558
+    },
+    {
+      "path": "docs/research/GRID_QUALITY.md",
+      "sha256": "fafb6c26408fbea09ea986f4049314130beac7d8f1b1c4798a4c7ef81b3e9fce",
+      "bytes": 638
+    },
+    {
+      "path": "docs/research/METRICS_CATALOG.md",
+      "sha256": "1f07616d21bb32770dc96656861bc865ef8df4da3215231d75ba2bf383ac63aa",
+      "bytes": 1049
+    },
+    {
+      "path": "docs/research/PV_MPPT.md",
+      "sha256": "4b9b50c214900d7a3d6c4d987c186239f1fb6695e010be82c5f9007fc11e2b10",
+      "bytes": 671
+    },
+    {
+      "path": "docs/research/SCIENTIFIC_METHOD.md",
+      "sha256": "5d2507fa836192c8f04479dd3e0fa010da53e77279f441d0eb9caf5bd5df0151",
+      "bytes": 544
+    },
+    {
+      "path": "rules/catalog.v0.1.yaml",
+      "sha256": "4fd313cbed86f4f69b994ff61b769c055037f697343a266ab06ad6524960ba3e",
+      "bytes": 981
+    }
+  ]
+}

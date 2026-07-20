@@ -1,0 +1,40 @@
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+
+# Node
+node_modules/
+dist/
+.next/
+coverage/
+
+# Data and private evidence
+data/raw/
+data/private/
+reports/private/
+*.parquet
+*.duckdb
+*.sqlite
+*.db
+
+# SolarMAN exports
+*Datos detallados*.csv
+*Datos detallados*.xlsx
+
+# IDE / OS
+.DS_Store
+.idea/
+.vscode/
+
+# Generated
+artifacts/
+.tmp/

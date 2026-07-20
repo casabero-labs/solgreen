@@ -1,0 +1,13 @@
+profileVersion: 0.1.0
+name: colombia-split-phase-review-required
+status: pending_expert_confirmation
+nominal:
+  lineToNeutralV: 120
+  frequencyHz: 60
+thresholds:
+  overvoltageV: null
+  undervoltageV: null
+  frequencyHighHz: null
+  frequencyLowHz: null
+notes:
+  - No activar reglas operativas con este perfil hasta confirmar Grid Code, manual y medición de la instalación.

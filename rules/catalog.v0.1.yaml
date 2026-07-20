@@ -1,0 +1,38 @@
+catalogVersion: 0.1.0
+rules:
+  - id: DATA-001
+    version: 1.0.0
+    name: missing_interval
+    severityBase: low
+    requiredSignals: [timestamp]
+    params:
+      gapFactor: 1.5
+  - id: DATA-003
+    version: 1.0.0
+    name: impossible_soc_jump
+    severityBase: medium
+    requiredSignals: [battery_soc_pct, battery_charge_w, battery_discharge_w]
+  - id: BAT-001
+    version: 1.0.0
+    name: low_soc
+    severityBase: high
+    requiredSignals: [battery_soc_pct]
+    params:
+      warningPct: 20
+      highPct: 15
+      criticalPct: 10
+  - id: PV-001
+    version: 1.0.0
+    name: pv_dropout_voltage_present
+    severityBase: high
+    requiredSignals: [pv1_voltage_v, pv2_voltage_v, pv1_power_w, pv2_power_w]
+  - id: GRID-001
+    version: 1.0.0
+    name: grid_overvoltage
+    severityBase: high
+    requiredSignals: [grid_l1_voltage_v, grid_l2_voltage_v]
+  - id: INV-001
+    version: 1.0.0
+    name: initialization_storm
+    severityBase: high
+    requiredSignals: [machine_state]

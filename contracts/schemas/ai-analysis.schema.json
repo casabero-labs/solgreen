@@ -1,0 +1,123 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://solgreen.local/schemas/ai-analysis.schema.json",
+  "title": "Solgreen AI Analysis",
+  "type": "object",
+  "required": [
+    "summary",
+    "issues",
+    "actions",
+    "missingInformation",
+    "disclaimer"
+  ],
+  "properties": {
+    "summary": {
+      "type": "string"
+    },
+    "issues": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/issue"
+      }
+    },
+    "actions": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/action"
+      }
+    },
+    "missingInformation": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "disclaimer": {
+      "type": "string"
+    }
+  },
+  "$defs": {
+    "issue": {
+      "type": "object",
+      "required": [
+        "issueId",
+        "title",
+        "hypothesis",
+        "supportLevel",
+        "evidenceRefs",
+        "alternatives"
+      ],
+      "properties": {
+        "issueId": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "hypothesis": {
+          "type": "string"
+        },
+        "supportLevel": {
+          "enum": [
+            "weak",
+            "moderate",
+            "strong"
+          ]
+        },
+        "evidenceRefs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "alternatives": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "action": {
+      "type": "object",
+      "required": [
+        "priority",
+        "description",
+        "responsible",
+        "safetyClass"
+      ],
+      "properties": {
+        "priority": {
+          "enum": [
+            "P0",
+            "P1",
+            "P2",
+            "P3"
+          ]
+        },
+        "description": {
+          "type": "string"
+        },
+        "responsible": {
+          "enum": [
+            "owner",
+            "installer",
+            "utility",
+            "manufacturer"
+          ]
+        },
+        "safetyClass": {
+          "enum": [
+            "observation",
+            "measurement",
+            "qualified_technician_only"
+          ]
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

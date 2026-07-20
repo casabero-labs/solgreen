@@ -1,0 +1,121 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://solgreen.local/schemas/episode.schema.json",
+  "title": "Solgreen Episode",
+  "type": "object",
+  "required": [
+    "episodeId",
+    "plantId",
+    "type",
+    "startAt",
+    "endAt",
+    "severity",
+    "confidence",
+    "ruleRefs",
+    "evidences"
+  ],
+  "properties": {
+    "episodeId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "plantId": {
+      "type": "string"
+    },
+    "type": {
+      "type": "string"
+    },
+    "startAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "peakAt": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "endAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "severity": {
+      "enum": [
+        "info",
+        "low",
+        "medium",
+        "high",
+        "critical"
+      ]
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "ruleRefs": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    },
+    "evidences": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/evidence"
+      }
+    },
+    "limitations": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "$defs": {
+    "evidence": {
+      "type": "object",
+      "required": [
+        "evidenceId",
+        "signal",
+        "kind",
+        "value",
+        "unit",
+        "sourceRef"
+      ],
+      "properties": {
+        "evidenceId": {
+          "type": "string"
+        },
+        "signal": {
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "measured",
+            "normalized",
+            "calculated"
+          ]
+        },
+        "value": {},
+        "unit": {
+          "type": "string"
+        },
+        "timestamp": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "sourceRef": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

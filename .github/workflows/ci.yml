@@ -1,0 +1,23 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  documentation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate required docs
+        run: |
+          test -f README.md
+          test -f AGENTS.md
+          test -f docs/domain/FOUNDATIONS.md
+          test -f docs/domain/DATA_CONTRACTS.md
+          test -f docs/phases/LOOP_REGISTRY.md
+          test -f docs/qa_reports/TEST_PLAN.md
+      - name: Reject committed secrets and private exports
+        run: |
+          ! find . -type f \( -name '*.csv' -o -name '*.xlsx' -o -name '.env' \) | grep .
