@@ -5,6 +5,7 @@ from uuid import UUID, uuid4
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 from solgreen.contracts.enums import ImportStatus, SourceType
+from solgreen.quality._types import QualityResult
 
 Sha256Hex = Annotated[
     str,
@@ -24,6 +25,7 @@ class QualitySummary(BaseModel):
     rows_rejected: int = Field(ge=0)
     detected_columns: tuple[str, ...]
     missing_canonical_columns: tuple[str, ...] = Field(default_factory=tuple)
+    quality_result: QualityResult | None = Field(default=None)
 
 
 class ImportMetadata(BaseModel):

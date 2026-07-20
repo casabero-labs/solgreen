@@ -20,6 +20,7 @@ from solgreen.importer.reporter import (
     write_report_json,
     write_report_markdown,
 )
+from solgreen.quality import analyze_plant_flow, analyze_telemetry
 
 app = typer.Typer(add_completion=False, help="Solgreen CLI", no_args_is_help=True)
 
@@ -70,13 +71,19 @@ def import_file(
     samples: list[PlantFlowSample] | list[InverterTelemetrySample]
     if source_type == SourceType.SOLARMAN_PLANT_FLOW:
         samples = parse_plant_flow(file)
-        summary = summarize_flow(samples, PLANT_FLOW_COLUMNS)
+        quality_result = analyze_plant_flow(samples, source_type)
+        summary = summarize_flow(
+            samples, PLANT_FLOW_COLUMNS, quality_result=quality_result
+        )
         parser_id = f"solarman_flow_{file.suffix.lstrip('.').lower()}"
     elif source_type == SourceType.SOLARMAN_INVERTER_TELEMETRY:
         samples = parse_inverter_telemetry(file)
         from solgreen.contracts import ORIGINAL_ES_TO_CANONICAL
 
-        summary = summarize_telemetry(samples, tuple(ORIGINAL_ES_TO_CANONICAL.keys()))
+        quality_result = analyze_telemetry(samples, source_type)
+        summary = summarize_telemetry(
+            samples, tuple(ORIGINAL_ES_TO_CANONICAL.keys()), quality_result=quality_result
+        )
         parser_id = f"solarman_telemetry_{file.suffix.lstrip('.').lower()}"
     else:
         raise typer.BadParameter(f"Unsupported source type: {source_type}")
