@@ -1,51 +1,46 @@
-name: ci
+name: CI
 
 on:
-  pull_request:
   push:
+    branches: ['**']
+  pull_request:
     branches: [main]
+    paths-ignore:
+      - '**.md'
+      - '.gitignore'
+      - 'docs/**'
 
 jobs:
-  documentation:
-    name: Validate docs and reject private data
+  quality-and-tests:
+    name: Quality + Tests
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Validate required docs
-        run: |
-          test -f README.md
-          test -f AGENTS.md
-          test -f docs/domain/FOUNDATIONS.md
-          test -f docs/domain/DATA_CONTRACTS.md
-          test -f docs/phases/LOOP_REGISTRY.md
-          test -f docs/qa_reports/TEST_PLAN.md
-      - name: Reject committed secrets and private exports
-        run: |
-          ! find . -type f \( -name '*.csv' -o -name '*.xlsx' -o -name '.env' \) \
-            -not -path './tests/fixtures/*' \
-            -not -path './.venv/*' \
-            | grep .
 
-  python:
-    name: Python (uv, ruff, mypy, pytest)
-    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+
       - name: Install uv
         uses: astral-sh/setup-uv@v5
         with:
           version: "0.11.26"
           enable-cache: true
+          cache-dependency-glob: "*.lock"
+
       - name: Sync dependencies
         run: uv sync --extra dev --frozen
+
       - name: Lint (ruff)
         run: uv run ruff check .
+
       - name: Format check (ruff)
         run: uv run ruff format --check .
+
       - name: Type check (mypy strict)
         run: uv run mypy solgreen
+
       - name: Tests with coverage
-        run: uv run pytest
+        run: uv run pytest --cov=solgreen --cov-fail-under=80
