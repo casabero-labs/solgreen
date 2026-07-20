@@ -199,7 +199,16 @@ jobs:
           NODE
 
       - name: Type check
-        run: npm run typecheck
+        run: npm run typecheck > frontend-typecheck.txt 2>&1
+
+      - name: Upload TypeScript diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-typecheck
+          path: apps/web/frontend-typecheck.txt
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Component tests
         run: npm run test
