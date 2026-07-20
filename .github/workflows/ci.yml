@@ -42,6 +42,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -70,8 +72,27 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-      - name: Format check
-        run: uv run ruff format --check --diff . > ruff-format.diff
+      - name: Format changed Python files
+        shell: bash
+        run: |
+          if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
+            range="origin/$GITHUB_BASE_REF...HEAD"
+          else
+            before="${{ github.event.before }}"
+            if [[ -z "$before" || "$before" =~ ^0+$ ]]; then
+              before="$(git rev-list --max-parents=0 HEAD)"
+            fi
+            range="$before..HEAD"
+          fi
+
+          mapfile -t files < <(git diff --name-only "$range" -- '*.py')
+          if (( ${#files[@]} == 0 )); then
+            echo 'No changed Python files to format-check.'
+            exit 0
+          fi
+
+          printf 'Checking formatting for:\n%s\n' "${files[*]}"
+          uv run ruff format --check --diff "${files[@]}" > ruff-format.diff
 
       - name: Upload Ruff format diff
         if: failure()
