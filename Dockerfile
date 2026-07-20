@@ -13,7 +13,7 @@ RUN pip install --no-cache-dir uv && \
 COPY . .
 RUN uv sync --frozen --no-dev
 
-ENV PATH="/root/.local/bin:$PATH"
+ENV PATH="/app/.venv/bin:/root/.local/bin:$PATH"
 
 EXPOSE 8000
 
