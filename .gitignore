@@ -13,6 +13,7 @@ __pycache__/
 .coverage
 .coverage.*
 htmlcov/
+*.egg-info/
 
 # Node
 node_modules/

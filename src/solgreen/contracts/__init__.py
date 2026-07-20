@@ -11,6 +11,8 @@ from solgreen.contracts.import_batch import (
     QualitySummary,
 )
 from solgreen.contracts.inverter_telemetry import (
+    CANONICAL_NAME_TO_INDEX,
+    ORIGINAL_ES_TO_CANONICAL,
     SIGNAL_SPECS,
     InverterTelemetrySample,
     SignalSpec,
@@ -20,6 +22,8 @@ from solgreen.contracts.plant_flow import PlantFlowSample
 from solgreen.contracts.validity import ValidityFlags, ValidityReason
 
 __all__ = [
+    "CANONICAL_NAME_TO_INDEX",
+    "ORIGINAL_ES_TO_CANONICAL",
     "SIGNAL_SPECS",
     "ImportBatch",
     "ImportMetadata",
