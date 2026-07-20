@@ -59,7 +59,16 @@ jobs:
         run: uv sync --extra dev --frozen
 
       - name: Lint
-        run: uv run ruff check .
+        run: uv run ruff check . --output-format=json > ruff-report.json
+
+      - name: Upload Ruff diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ruff-report
+          path: ruff-report.json
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Format check
         run: uv run ruff format --check .
