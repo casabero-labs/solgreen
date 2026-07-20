@@ -105,5 +105,9 @@ exclude = ["artifacts", ".venv", "build", "dist"]
 module = "tests.*"
 disallow_untyped_defs = false
 
+[[tool.mypy.overrides]]
+module = ["psycopg2", "psycopg2.*"]
+ignore_missing_imports = true
+
 [tool.coverage.run]
 omit = ["solgreen/db/*"]
