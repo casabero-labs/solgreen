@@ -44,3 +44,4 @@ reports/private/
 # Generated
 artifacts/
 .tmp/
+graphify-out/
