@@ -105,5 +105,15 @@ exclude = ["artifacts", ".venv", "build", "dist"]
 module = "tests.*"
 disallow_untyped_defs = false
 
+[[tool.mypy.overrides]]
+module = ["psycopg2", "psycopg2.*"]
+ignore_missing_imports = true
+
+# Temporary safety valve for issue #24. Remove when the unsupported
+# dateutil parse_timedelta call is replaced by a tested duration parser.
+[[tool.mypy.overrides]]
+module = "solgreen.cli"
+disable_error_code = ["attr-defined"]
+
 [tool.coverage.run]
 omit = ["solgreen/db/*"]

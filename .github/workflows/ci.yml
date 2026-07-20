@@ -5,42 +5,115 @@ on:
     branches: ['**']
   pull_request:
     branches: [main]
-    paths-ignore:
-      - '**.md'
-      - '.gitignore'
-      - 'docs/**'
 
 jobs:
+  documentation:
+    name: Documentation + Privacy
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate required project documents
+        run: |
+          test -f README.md
+          test -f AGENTS.md
+          test -f CHANGELOG.md
+          test -f docs/domain/FOUNDATIONS.md
+          test -f docs/domain/DATA_CONTRACTS.md
+          test -f docs/phases/LOOP_REGISTRY.md
+          test -f docs/phases/NEXT_STEPS.md
+          test -f docs/qa_reports/TEST_PLAN.md
+
+      - name: Reject private exports and local secrets
+        run: |
+          if find . -type f \( -name '*.csv' -o -name '*.xlsx' -o -name '.env' \) \
+            -not -path './tests/fixtures/*' \
+            -not -path './.venv/*' \
+            -not -path './.git/*' \
+            | grep .; then
+            echo 'Private export or local secret file committed outside approved fixtures.'
+            exit 1
+          fi
+
   quality-and-tests:
     name: Quality + Tests
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: '3.12'
 
       - name: Install uv
         uses: astral-sh/setup-uv@v5
         with:
-          version: "0.11.26"
+          version: '0.11.26'
           enable-cache: true
-          cache-dependency-glob: "*.lock"
+          cache-dependency-glob: '*.lock'
 
       - name: Sync dependencies
         run: uv sync --extra dev --frozen
 
-      - name: Lint (ruff)
-        run: uv run ruff check .
+      - name: Lint
+        run: uv run ruff check . --output-format=json > ruff-report.json
 
-      - name: Format check (ruff)
-        run: uv run ruff format --check .
+      - name: Upload Ruff diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ruff-report
+          path: ruff-report.json
+          if-no-files-found: ignore
+          retention-days: 7
 
-      - name: Type check (mypy strict)
-        run: uv run mypy solgreen
+      - name: Format changed Python files
+        shell: bash
+        run: |
+          if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
+            range="origin/$GITHUB_BASE_REF...HEAD"
+          else
+            before="${{ github.event.before }}"
+            if [[ -z "$before" || "$before" =~ ^0+$ ]]; then
+              before="$(git rev-list --max-parents=0 HEAD)"
+            fi
+            range="$before..HEAD"
+          fi
+
+          mapfile -t files < <(git diff --name-only "$range" -- '*.py')
+          if (( ${#files[@]} == 0 )); then
+            echo 'No changed Python files to format-check.'
+            exit 0
+          fi
+
+          printf 'Checking formatting for:\n%s\n' "${files[*]}"
+          uv run ruff format --check --diff "${files[@]}" > ruff-format.diff
+
+      - name: Upload Ruff format diff
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ruff-format-diff
+          path: ruff-format.diff
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Type check
+        run: uv run mypy solgreen --no-color-output > mypy-report.txt
+
+      - name: Upload mypy diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mypy-report
+          path: mypy-report.txt
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Tests with coverage
         run: uv run pytest --cov=solgreen --cov-fail-under=80

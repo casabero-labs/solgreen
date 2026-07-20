@@ -99,14 +99,14 @@ class TestDetectDuplicates:
             _make_telemetry(datetime(2026, 7, 17, 12, 0, tzinfo=UTC)),
             _make_telemetry(datetime(2026, 7, 17, 12, 5, tzinfo=UTC)),
         ]
-        ordering, dups = _detect_duplicates(samples)
+        ordering, _dups = _detect_duplicates(samples)
         assert ordering.was_ordered is False
         assert ordering.was_strict is True
 
 
 class TestDetectDuplicatesFlow:
     def test_empty_list(self) -> None:
-        ordering, dups = _detect_duplicates_flow([])
+        ordering, _dups = _detect_duplicates_flow([])
         assert ordering.was_ordered is True
         assert ordering.was_strict is True
 

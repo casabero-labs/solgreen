@@ -32,11 +32,18 @@ def _telemetry(ts: datetime, **kwargs: object) -> InverterTelemetrySample:
 
 class TestPvPower:
     def test_both_pv_signals(self) -> None:
-        t = _telemetry(datetime(2026, 7, 17, 12, 0, tzinfo=UTC), potencia_cc_pv1_w=1500.0, potencia_cc_pv2_w=1300.0)
+        t = _telemetry(
+            datetime(2026, 7, 17, 12, 0, tzinfo=UTC),
+            potencia_cc_pv1_w=1500.0,
+            potencia_cc_pv2_w=1300.0,
+        )
         assert _pv_power(t) == 2800.0
 
     def test_only_pv1(self) -> None:
-        t = _telemetry(datetime(2026, 7, 17, 12, 0, tzinfo=UTC), potencia_cc_pv1_w=1500.0)
+        t = _telemetry(
+            datetime(2026, 7, 17, 12, 0, tzinfo=UTC),
+            potencia_cc_pv1_w=1500.0,
+        )
         assert _pv_power(t) == 1500.0
 
     def test_none_if_no_pv(self) -> None:
@@ -68,8 +75,14 @@ class TestJoinByTolerance:
 
     def test_only_flow_samples(self) -> None:
         samples = [
-            _flow(datetime(2026, 7, 17, 12, 0, tzinfo=UTC), potencia_de_produccion_w=2800.0),
-            _flow(datetime(2026, 7, 17, 12, 5, tzinfo=UTC), potencia_de_produccion_w=2900.0),
+            _flow(
+                datetime(2026, 7, 17, 12, 0, tzinfo=UTC),
+                potencia_de_produccion_w=2800.0,
+            ),
+            _flow(
+                datetime(2026, 7, 17, 12, 5, tzinfo=UTC),
+                potencia_de_produccion_w=2900.0,
+            ),
         ]
         result = join_by_tolerance(samples, [])
         assert len(result) == 2
@@ -78,7 +91,10 @@ class TestJoinByTolerance:
 
     def test_only_telemetry_samples(self) -> None:
         samples = [
-            _telemetry(datetime(2026, 7, 17, 12, 0, tzinfo=UTC), potencia_cc_pv1_w=1500.0),
+            _telemetry(
+                datetime(2026, 7, 17, 12, 0, tzinfo=UTC),
+                potencia_cc_pv1_w=1500.0,
+            ),
         ]
         result = join_by_tolerance([], samples)
         assert len(result) == 1
@@ -88,7 +104,13 @@ class TestJoinByTolerance:
     def test_within_tolerance_merges(self) -> None:
         ts = datetime(2026, 7, 17, 12, 0, tzinfo=UTC)
         flow_samples = [_flow(ts, potencia_de_produccion_w=2800.0)]
-        tel_samples = [_telemetry(ts, potencia_cc_pv1_w=1500.0, potencia_cc_pv2_w=1300.0)]
+        tel_samples = [
+            _telemetry(
+                ts,
+                potencia_cc_pv1_w=1500.0,
+                potencia_cc_pv2_w=1300.0,
+            )
+        ]
         result = join_by_tolerance(flow_samples, tel_samples)
         assert len(result) == 1
         assert result[0].source == "merged"
@@ -118,9 +140,9 @@ class TestJoinByTolerance:
         tel_samples = [_telemetry(ts_tel1), _telemetry(ts_tel2)]
         result = join_by_tolerance(flow_samples, tel_samples)
         assert len(result) == 2
-        merged = [r for r in result if r.source == "merged"][0]
+        merged = next(r for r in result if r.source == "merged")
         assert merged.time_delta == timedelta(minutes=1)
-        unmatched = [r for r in result if r.source == "telemetry"][0]
+        unmatched = next(r for r in result if r.source == "telemetry")
         assert unmatched.timestamp_axis == ts_tel2
 
     def test_custom_tolerance(self) -> None:
@@ -128,10 +150,18 @@ class TestJoinByTolerance:
         ts_tel = datetime(2026, 7, 17, 12, 3, tzinfo=UTC)
         flow_samples = [_flow(ts_flow)]
         tel_samples = [_telemetry(ts_tel)]
-        result = join_by_tolerance(flow_samples, tel_samples, tolerance=timedelta(minutes=2))
+        result = join_by_tolerance(
+            flow_samples,
+            tel_samples,
+            tolerance=timedelta(minutes=2),
+        )
         assert len(result) == 2
         assert all(r.source in ("flow", "telemetry") for r in result)
-        result_wider = join_by_tolerance(flow_samples, tel_samples, tolerance=timedelta(minutes=5))
+        result_wider = join_by_tolerance(
+            flow_samples,
+            tel_samples,
+            tolerance=timedelta(minutes=5),
+        )
         assert len(result_wider) == 1
         assert result_wider[0].source == "merged"
 

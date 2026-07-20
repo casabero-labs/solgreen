@@ -1,5 +1,8 @@
 from datetime import UTC, datetime, timedelta
 
+import pytest
+from pydantic import ValidationError
+
 from solgreen.timeline.canonical import CanonicalSample
 
 
@@ -51,8 +54,7 @@ class TestCanonicalSample:
         assert sample.confidence == 0.0
 
     def test_extra_forbidden(self) -> None:
-        import pytest
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
             CanonicalSample(
                 timestamp_axis=datetime(2026, 7, 17, 12, 0, tzinfo=UTC),
                 source="flow",

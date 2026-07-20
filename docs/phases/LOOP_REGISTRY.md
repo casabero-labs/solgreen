@@ -1,79 +1,107 @@
 # Loop Registry — Solgreen
 
+## Metodología
+
+Solgreen aplica `casabero-labs/estandar-casabero`:
+
+```text
+DISCOVER → PLAN → EXECUTE → VERIFY → ITERATE → CLOSEOUT
+```
+
+Cada loop debe declarar `GOAL`, `CONTEXT`, `ACTION`, `FEEDBACK`, `STOP CONDITION`, `HUMAN GATE`, `ROLLBACK` y próximo paso exacto.
+
 ## Feedback disponible
 
 - schemas de los dos datasets;
-- datasets privados iniciales;
+- fixtures sintéticos;
+- datasets privados iniciales fuera de Git;
 - episodios dorados del 17 y 19 de julio;
-- pruebas unitarias y de integración;
-- validación visual;
+- pruebas unitarias e integración;
+- CI;
 - revisión humana del propietario;
 - diagnóstico posterior del instalador.
 
+## Comandos de verificación
+
+```bash
+uv sync --extra dev --frozen
+uv run ruff check .
+uv run ruff format --check .
+uv run mypy solgreen
+uv run pytest
+```
+
 ## Human gates
 
-- perfil de planta;
-- umbrales de fabricante;
-- clasificación de severidad crítica;
+- perfil real de planta;
+- límites de batería y red;
+- severidad crítica;
 - confirmación de causa;
-- sharing de reportes;
-- cualquier futura capacidad de escritura.
+- aprobación de umbrales;
+- merge;
+- reportes compartidos;
+- deploy automático;
+- cualquier capacidad de escritura sobre equipos.
 
-## Loops
+## Límites de iteración
 
-### L0 — Foundation freeze
+- un solo objetivo verificable por loop;
+- máximo tres correcciones automáticas antes de escalar;
+- no mezclar feature, refactor y deploy si pueden separarse;
+- ningún loop se cierra si docs, tests y código se contradicen.
 
-**GOAL:** cerrar fundamentos, contratos y alcance.  
-**FEEDBACK:** revisión documental.  
-**STOP:** cero contradicciones abiertas críticas.
+## Estado oficial
 
-### L1 — Importación reproducible
+| Track | Objetivo | Feedback | Stop condition | Estado |
+|---|---|---|---|---|
+| F0 | Fundamentos y contratos | revisión documental | cero contradicciones críticas | NEEDS_RECONCILIATION |
+| I1 | Importación reproducible | parser/hash/tests | ambos formatos reproducibles | CLOSED |
+| Q2 | Calidad de datos | tests de calidad | plausibilidad y cobertura verificadas | PARTIAL |
+| T3 | Timeline canónico | tests de join/lineage | cada valor rastreable a ambas fuentes | PARTIAL |
+| M4 | Métricas físicas | fixtures y fórmulas | energía, balance, batería, PV y red validados | NOT_STARTED |
+| E5 | Eventos y episodios | golden cases | 17 y 19 reconstruidos | PROTOTYPE_ONLY |
+| R6 | Reglas determinísticas | tests por regla | condición real evaluada, no presencia de señal | CATALOG_ONLY |
+| A7 | IA validada | schema, refs y adversarial tests | cero respuestas inválidas aceptadas | EXPERIMENTAL_BLOCKED |
+| P8 | Persistencia | integración PostgreSQL | lineage, idempotencia y migraciones probadas | PARTIAL |
+| U9 | UI y D3 | E2E humano | exploración completa y accesible | NOT_STARTED |
+| G10 | Reportes | golden PDF | instalador audita cada hallazgo | NOT_STARTED |
+| O11 | Operación | deploy + SHA + health | restore y smoke documentados | PARTIAL_UNVERIFIED |
+| ECO | Afinia y gestión de cargas | golden billing | factura y horarios reproducibles | DESIGNED_NOT_MERGED |
 
-**GOAL:** reconocer y parsear ambos formatos.  
-**FEEDBACK:** filas, columnas, hash, timestamps y tests.  
-**STOP:** imports idempotentes y sin pérdida.
+## Loop correctivo activo
 
-### L2 — Calidad de datos
+### R0 — Development reconciliation and safety gate
 
-**GOAL:** huecos, duplicados, invalidez y score.  
-**STOP:** golden cases detectados.
+**GOAL:** alinear estado documental y código, bloquear falsos diagnósticos y restaurar feedback de CI.
 
-### L3 — Timeline canónico
+**CONTEXT:** auditoría 2026-07-20, PRs #9–#19, PR #8, estándares Casabero.
 
-**GOAL:** sincronizar datasets con lineage.  
-**STOP:** cada valor rastreable.
+**ACTION:**
 
-### L4 — Métricas físicas
+1. reconciliar README, CHANGELOG, NEXT_STEPS y este registro;
+2. restaurar validación documental y de privacidad;
+3. impedir que una regla se active solo porque una señal existe;
+4. conservar cero medido y estados textuales;
+5. bloquear IA cuando no exista evidencia evaluada;
+6. dejar la pista económica pendiente de rebase.
 
-**GOAL:** balances, energía y métricas base.  
-**STOP:** fórmulas verificadas con fixtures.
+**FEEDBACK:** ruff, format, mypy, pytest, cobertura, CI documental y revisión del PR.
 
-### L5 — Catálogo de reglas v0.1
+**STOP CONDITION:** documentación y código describen el mismo estado y ninguna salida experimental puede presentarse como diagnóstico real.
 
-**GOAL:** implementar reglas críticas.  
-**STOP:** golden events reproducibles.
+**HUMAN GATE:** merge del PR correctivo y decisión sobre rebase del PR #8.
 
-### L6 — Episodios
+**ROLLBACK:** cerrar el PR sin merge; `main` permanece intacta.
 
-**GOAL:** agrupar eventos y ventanas contextuales.  
-**STOP:** 17 y 19 de julio correctamente reconstruidos.
+## Próximo loop después de R0
 
-### L7 — Visualización D3
+### Q2.3 — Plausibilidad física y calidad avanzada
 
-**GOAL:** explorador científico.  
-**STOP:** flujos UX y accesibilidad aprobados.
+- saltos SOC;
+- temperaturas imposibles;
+- signos contradictorios;
+- huecos ponderados por duración;
+- lote vacío no perfecto;
+- consistencia básica entre fuentes.
 
-### L8 — IA validada
-
-**GOAL:** MiniMax/DeepSeek con schema y evidence refs.  
-**STOP:** cero respuestas inválidas aceptadas.
-
-### L9 — Reportes
-
-**GOAL:** PDF técnico reproducible.  
-**STOP:** instalador puede auditar todo hallazgo.
-
-### L10 — Operación
-
-**GOAL:** deploy, observabilidad, backups y seguridad.  
-**STOP:** health 200, restore probado y runbooks listos.
+No avanzar a UI, facturación o diagnósticos IA hasta cerrar M4, E5 y R6 con golden cases.
