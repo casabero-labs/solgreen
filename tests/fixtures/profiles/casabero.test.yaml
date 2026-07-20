@@ -1,0 +1,21 @@
+limits:
+  battery:
+    maxChargePowerW: null
+    maxDischargePowerW: null
+    normalMinSocPct: 20
+    source: pending_model_confirmation
+    temporaryEmergencyMinSocPct: 10
+  grid:
+    profileRef: colombia-split-phase-review-required
+plantAlias: casabero-test
+privacy:
+  redactSerialInSharedReports: true
+  storeSerialEncrypted: true
+profileVersion: 0.1.0
+siteTimezone: America/Bogota
+system:
+  batteryNominalEnergyWh: 11000
+  batteryNominalVoltageV: 51.2
+  inverterRatedPowerW: 8000
+  pvMpptCount: 2
+  topology: hybrid_split_phase

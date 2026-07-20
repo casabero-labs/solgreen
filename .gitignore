@@ -12,8 +12,10 @@ __pycache__/
 .venv/
 .coverage
 .coverage.*
+.coverage *
 htmlcov/
 *.egg-info/
+build/
 
 # Node
 node_modules/
