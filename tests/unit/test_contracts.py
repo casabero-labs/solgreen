@@ -140,6 +140,50 @@ def test_inverter_telemetry_sample_round_trip_get_float() -> None:
     assert sample.get_float("current_state_of_machine") is None
 
 
+def test_inverter_telemetry_sample_get_text_returns_str_value() -> None:
+    ts = datetime(2026, 7, 17, 12, 37, tzinfo=UTC)
+    sample = InverterTelemetrySample(
+        timestamp_original=ts,
+        timestamp_utc=ts,
+        timezone_source="UTC",
+        signals={"current_state_of_machine": "Standby"},
+    )
+    assert sample.get_text("current_state_of_machine") == "Standby"
+
+
+def test_inverter_telemetry_sample_get_text_returns_none_when_missing() -> None:
+    ts = datetime(2026, 7, 17, 12, 37, tzinfo=UTC)
+    sample = InverterTelemetrySample(
+        timestamp_original=ts,
+        timestamp_utc=ts,
+        timezone_source="UTC",
+        signals={},
+    )
+    assert sample.get_text("current_state_of_machine") is None
+
+
+def test_inverter_telemetry_sample_get_text_returns_none_when_numeric() -> None:
+    ts = datetime(2026, 7, 17, 12, 37, tzinfo=UTC)
+    sample = InverterTelemetrySample(
+        timestamp_original=ts,
+        timestamp_utc=ts,
+        timezone_source="UTC",
+        signals={"current_state_of_machine": 0},
+    )
+    assert sample.get_text("current_state_of_machine") is None
+
+
+def test_inverter_telemetry_sample_get_text_strips_whitespace() -> None:
+    ts = datetime(2026, 7, 17, 12, 37, tzinfo=UTC)
+    sample = InverterTelemetrySample(
+        timestamp_original=ts,
+        timestamp_utc=ts,
+        timezone_source="UTC",
+        signals={"current_state_of_machine": "  Standby  "},
+    )
+    assert sample.get_text("current_state_of_machine") == "Standby"
+
+
 def test_inverter_telemetry_sample_rejects_unknown_signal_name() -> None:
     ts = datetime(2026, 7, 17, 12, 37, tzinfo=UTC)
     with pytest.raises(ValidationError):

@@ -52,7 +52,7 @@ def join_by_tolerance(
                     telemetry_grid_power_w=t.get_float("potencia_total_ca_w"),
                     telemetry_battery_power_w=t.get_float("potencia_de_bateria_w"),
                     telemetry_soc_pct=t.get_float("soc_pct"),
-                    telemetry_inverter_state=t.get_float("current_state_of_machine") if t.signals.get("current_state_of_machine") is not None else None,
+                    telemetry_inverter_state=t.get_text("current_state_of_machine"),
                     quality_level="normalized",
                     confidence=confidence,
                 )
@@ -99,7 +99,11 @@ def _pv_power(t: InverterTelemetrySample) -> float | None:
     pv2 = t.get_float("potencia_cc_pv2_w")
     if pv1 is not None and pv2 is not None:
         return pv1 + pv2
-    return pv1 or pv2
+    if pv1 is not None:
+        return pv1
+    if pv2 is not None:
+        return pv2
+    return None
 
 
 def _compute_confidence(delta: timedelta | None, tolerance: timedelta) -> float:

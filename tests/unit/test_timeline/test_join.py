@@ -50,6 +50,28 @@ class TestPvPower:
         t = _telemetry(datetime(2026, 7, 17, 12, 0, tzinfo=UTC))
         assert _pv_power(t) is None
 
+    def test_zero_pv1_only_is_preserved(self) -> None:
+        t = _telemetry(
+            datetime(2026, 7, 17, 12, 0, tzinfo=UTC),
+            potencia_cc_pv1_w=0.0,
+        )
+        assert _pv_power(t) == 0.0
+
+    def test_zero_pv2_only_is_preserved(self) -> None:
+        t = _telemetry(
+            datetime(2026, 7, 17, 12, 0, tzinfo=UTC),
+            potencia_cc_pv2_w=0.0,
+        )
+        assert _pv_power(t) == 0.0
+
+    def test_zero_both_pv_sums_to_zero(self) -> None:
+        t = _telemetry(
+            datetime(2026, 7, 17, 12, 0, tzinfo=UTC),
+            potencia_cc_pv1_w=0.0,
+            potencia_cc_pv2_w=0.0,
+        )
+        assert _pv_power(t) == 0.0
+
 
 class TestComputeConfidence:
     def test_zero_delta(self) -> None:
@@ -186,3 +208,41 @@ class TestJoinByTolerance:
         assert result[0].source == "flow"
         assert result[1].source == "telemetry"
         assert result[1].timestamp_axis == ts_tel
+
+
+class TestInverterStateTextual:
+    def test_merged_sample_preserves_textual_state(self) -> None:
+        ts = datetime(2026, 7, 17, 12, 0, tzinfo=UTC)
+        flow_samples = [_flow(ts, potencia_de_produccion_w=1000.0)]
+        tel_samples = [
+            _telemetry(
+                ts,
+                potencia_cc_pv1_w=500.0,
+                current_state_of_machine="Standby",
+            )
+        ]
+        result = join_by_tolerance(flow_samples, tel_samples)
+        assert len(result) == 1
+        assert result[0].source == "merged"
+        assert result[0].telemetry_inverter_state == "Standby"
+        assert isinstance(result[0].telemetry_inverter_state, str)
+
+    def test_telemetry_only_sample_preserves_textual_state(self) -> None:
+        ts = datetime(2026, 7, 17, 12, 0, tzinfo=UTC)
+        tel_samples = [
+            _telemetry(
+                ts,
+                potencia_cc_pv1_w=500.0,
+                current_state_of_machine="Waiting",
+            )
+        ]
+        result = join_by_tolerance([], tel_samples)
+        assert len(result) == 1
+        assert result[0].telemetry_inverter_state == "Waiting"
+
+    def test_missing_inverter_state_returns_none(self) -> None:
+        ts = datetime(2026, 7, 17, 12, 0, tzinfo=UTC)
+        flow_samples = [_flow(ts, potencia_de_produccion_w=1000.0)]
+        tel_samples = [_telemetry(ts, potencia_cc_pv1_w=500.0)]
+        result = join_by_tolerance(flow_samples, tel_samples)
+        assert result[0].telemetry_inverter_state is None
