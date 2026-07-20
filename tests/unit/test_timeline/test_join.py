@@ -53,9 +53,7 @@ class TestPvPower:
 
 class TestComputeConfidence:
     def test_zero_delta(self) -> None:
-        assert _compute_confidence(
-            timedelta(0), timedelta(minutes=2, seconds=30)
-        ) == 1.0
+        assert _compute_confidence(timedelta(0), timedelta(minutes=2, seconds=30)) == 1.0
 
     def test_half_tolerance(self) -> None:
         tol = timedelta(minutes=2, seconds=30)
