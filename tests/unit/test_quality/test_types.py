@@ -1,6 +1,7 @@
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from pydantic import ValidationError
 
 from solgreen.contracts.enums import SourceType
 from solgreen.quality._types import (
@@ -14,11 +15,13 @@ from solgreen.quality._types import (
 class TestDuplicateTimestamp:
     def test_frozen_model(self) -> None:
         dup = DuplicateTimestamp(
-            index=0, timestamp=datetime(2026, 7, 17, 12, 0, tzinfo=UTC),
-            count=2, indices=(0, 5),
+            index=0,
+            timestamp=datetime(2026, 7, 17, 12, 0, tzinfo=UTC),
+            count=2,
+            indices=(0, 5),
         )
-        with pytest.raises(Exception):
-            dup.index = 1  # type: ignore[attr-defined]
+        with pytest.raises(ValidationError, match="frozen"):
+            dup.index = 1  # type: ignore[misc]
 
     def test_fields(self) -> None:
         ts = datetime(2026, 7, 17, 12, 0, tzinfo=UTC)
@@ -32,17 +35,19 @@ class TestDuplicateTimestamp:
 class TestTemporalGap:
     def test_frozen_model(self) -> None:
         gap = TemporalGap(
-            before_index=0, after_index=5,
+            before_index=0,
+            after_index=5,
             gap_duration=timedelta(minutes=30),
             expected_interval=timedelta(minutes=5),
             gap_ratio=6.0,
         )
-        with pytest.raises(Exception):
-            gap.before_index = 1  # type: ignore[attr-defined]
+        with pytest.raises(ValidationError, match="frozen"):
+            gap.before_index = 1  # type: ignore[misc]
 
     def test_fields(self) -> None:
         gap = TemporalGap(
-            before_index=2, after_index=8,
+            before_index=2,
+            after_index=8,
             gap_duration=timedelta(minutes=45),
             expected_interval=timedelta(minutes=5),
             gap_ratio=9.0,
@@ -97,7 +102,8 @@ class TestQualityResult:
 
     def test_has_issues_true_with_gaps(self) -> None:
         gap = TemporalGap(
-            before_index=0, after_index=5,
+            before_index=0,
+            after_index=5,
             gap_duration=timedelta(minutes=30),
             expected_interval=timedelta(minutes=5),
             gap_ratio=6.0,
