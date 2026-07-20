@@ -45,3 +45,4 @@ reports/private/
 artifacts/
 .tmp/
 graphify-out/
+.playwright-mcp/
