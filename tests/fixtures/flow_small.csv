@@ -1,0 +1,6 @@
+Nombre de planta,Hora actualizada,Zona horaria,Potencia de producción(W),Potencia de consumo(W),Energía de la red(W),Poder adquisitivo(W),Potencia de alimentación(W),Potencia de la batería(W),Potencia de carga(W),Poder de descarga(W),SoC(%)
+casabero,2026-07-17 12:35:00,America/Bogota,2800,900,172.0,195.4,243.8,584.3,865.7,0.0,70.0
+casabero,2026-07-17 12:40:00,America/Bogota,3400,1100,-150.4,94.8,168.2,-322.9,0.0,498.5,70.5
+casabero,2026-07-17 12:45:00,America/Bogota,2800,900,121.6,134.0,203.7,554.3,459.5,0.0,71.0
+casabero,2026-07-17 12:50:00,America/Bogota,3400,1100,-471.0,9.6,418.4,-759.6,0.0,1129.3,71.5
+casabero,2026-07-17 12:55:00,America/Bogota,2800,900,295.9,44.5,399.0,1361.6,438.6,0.0,72.0
