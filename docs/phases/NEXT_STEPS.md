@@ -1,107 +1,145 @@
 # Plan ejecutable
 
-## Estado al cierre de L1
+## Baseline auditado
 
-L1 — Importación reproducible — cerrado el 2026-07-20.
-Cinco PRs mergeados a `main`:
+- Rama: `main`
+- SHA: `94a66407e258990bbf9d7ed347a86d9cf529caf5`
+- Fecha: 2026-07-20
+- Auditoría: [`../qa_reports/DEVELOPMENT_AUDIT_2026-07-20.md`](../qa_reports/DEVELOPMENT_AUDIT_2026-07-20.md)
 
-| PR    | Iteración | Contenido                                                                                                            |
-| ----- | --------- | -------------------------------------------------------------------------------------------------------------------- |
-| #1    | 1         | Scaffolding (uv + py3.12) + contratos Pydantic v2 (PlantFlow, InverterTelemetry, ImportBatch, SignalSpecs ×120).     |
-| #2    | 2         | Hashing SHA-256 + detector de formato + fixtures CSV sintéticos reproducibles.                                       |
-| #3    | 3         | Parser XLSX/CSV del flujo de planta con normalización de timestamps a UTC por fila.                                   |
-| #4    | 4         | Parser XLSX/CSV de telemetría (120 cols) con mapping `ORIGINAL_ES_TO_CANONICAL`.                                     |
-| #5    | 5         | Profile loaders (plant/grid YAML) + CLI `solgreen import` + reporter JSON/Markdown.                                  |
+## Resumen del avance real
 
-Ver [`CHANGELOG.md`](../../CHANGELOG.md) y [`LOOP_REGISTRY.md`](LOOP_REGISTRY.md).
+### Cerrado
 
-## Próximo loop ejecutable
+- I1 — importación reproducible de ambos formatos SolarMAN;
+- hashing, normalización temporal, fixtures y CLI básica.
 
-L2 — Data quality: huecos, duplicados, SOC imposible, signo contradictorio, score.
-Salida: módulo `solgreen/quality/` con reglas puras + extensión de `InverterTelemetrySample`
-y `PlantFlowSample` con campos `quality_score` y `quality_flags`.
+### Parcial
 
-Stop condition: los golden cases del 17 y 19 de julio quedan correctamente
-etiquetados sobre los fixtures sintéticos. Validación con archivos reales
-queda para cuando estén disponibles fuera del repo.
+- Q2 — orden, duplicados, huecos y score básico;
+- T3 — muestra canónica y join por tolerancia;
+- P8 — persistencia PostgreSQL inicial;
+- O11 — Docker, health y workflow de deploy.
 
-## Fase 0 — Freeze documental
+### Prototipo o catálogo
 
-- revisar Idea Brief;
-- confirmar perfil real de planta;
-- confirmar límites de batería y red;
-- cerrar schemas;
-- registrar ADRs.
+- agrupador temporal denominado episodio;
+- catálogo seed de reglas;
+- proveedores MiniMax/DeepSeek;
+- prompt y validador LLM.
 
-## Fase 1 — Importer core
+### No iniciado
+
+- métricas físicas;
+- detectores científicos de eventos;
+- evaluadores reales de reglas;
+- golden cases del 17 y 19;
+- UI D3;
+- PDF técnico;
+- motor de factura Afinia.
+
+## Próximo loop obligatorio
+
+# R0 — Development reconciliation and safety gate
+
+## Goal
+
+Restablecer coherencia entre documentación y código, evitar falsos diagnósticos y recuperar validación continua.
+
+## Scope
+
+- estado documental;
+- CI documental y privacidad;
+- seguridad de reglas seed;
+- semántica de cero FV;
+- estado textual del inversor;
+- bloqueo de IA sin evidencia evaluada;
+- tratamiento del PR #8 divergido.
+
+## Out of scope
+
+- nuevas reglas científicas;
+- métricas de energía;
+- UI;
+- D3;
+- facturación;
+- PDF;
+- cambios de esquema grandes;
+- control del inversor.
+
+## Stop conditions
+
+| Condición | Estado inicial |
+|---|---|
+| README, CHANGELOG, NEXT_STEPS y LOOP_REGISTRY coinciden | FAIL |
+| CI corre también en cambios documentales | FAIL |
+| reglas no se activan por mera presencia | FAIL |
+| cero FV permanece cero | FAIL |
+| estado textual permanece en muestras merged | FAIL |
+| IA no recibe reglas no evaluadas | FAIL |
+| PR económico no puede fusionarse accidentalmente | FAIL |
+| ruff, format, mypy y pytest pasan | PENDING |
+
+## Human gate
+
+No hacer merge automático. El propietario revisa el PR correctivo y autoriza el cierre de R0.
+
+## Después de R0
+
+### Q2.3 — Plausibilidad física y calidad avanzada
 
 Entregables:
 
-- detector de formato;
-- parser XLSX flujo de planta;
-- parser CSV telemetría;
-- hash y metadata;
-- pruebas con fixtures sintéticos;
-- reporte de importación.
+- salto SOC físicamente improbable;
+- temperatura imposible;
+- frecuencia y voltaje plausibles;
+- signo contradictorio;
+- huecos ponderados por duración;
+- cobertura temporal;
+- score que no considere perfecto un lote vacío;
+- tests sintéticos de regresión.
 
-## Fase 2 — Data quality
+### M4.1 — Energía y balance
 
-- huecos;
-- duplicados;
-- saltos SOC;
-- temperaturas inválidas;
-- signos contradictorios;
-- score y UI.
+Depende de Q2.3 y T3:
 
-## Fase 3 — Timeline
+- integración temporal de W a Wh/kWh;
+- tratamiento explícito de huecos;
+- balance por ventana;
+- residual y confianza;
+- fixtures con resultados manuales conocidos.
 
-- modelo canónico;
-- join por tolerancia;
-- lineage;
-- API temporal;
-- downsampling.
+### E5.1 — Eventos científicos
 
-## Fase 4 — Análisis determinístico
+Depende de M4:
 
-- balance;
-- batería;
-- PV/MPPT;
-- red;
-- estados;
-- reglas v0.1.
+- detector de dropout FV;
+- pérdida y retorno de red;
+- SOC bajo;
+- inicializaciones repetidas;
+- ventanas antes/durante/después;
+- golden cases del 17 y 19.
 
-## Fase 5 — Episodios y D3
+### R6.1 — Evaluadores determinísticos
 
-- agrupador;
-- timeline;
-- visor contextual;
-- heatmaps;
-- comparadores.
+Cada regla debe tener algoritmo, parámetros, evidencia, falsos positivos y tests. La presencia de una señal nunca equivale a activación.
 
-## Fase 6 — IA
+### A7.1 — IA validada
 
-- adapters;
+Solo después de R6.1:
+
+- evidence IDs estables;
+- exact coverage;
+- rechazo de referencias inexistentes;
+- rechazo de causas confirmadas;
 - prompts versionados;
-- schemas;
-- validadores;
-- consenso para severidad alta.
+- consenso opcional;
+- tests adversariales.
 
-## Fase 7 — Reportes
+### ECO — Rebase de inteligencia económica
 
-- plantillas;
-- generación PDF;
-- redacción de secretos;
-- anexos.
-
-## Fase 8 — Producción
-
-- Butterbase/PostgreSQL;
-- Coolify;
-- Infisical;
-- observabilidad;
-- backup/restore;
-- hardening.
+El PR #8 no debe fusionarse tal como está. Después de R0 debe recrearse desde main y conservar únicamente la fundación económica compatible.
 
 ## Próximo prompt ejecutable
 
-Implementar únicamente L1: importación reproducible, sin UI avanzada, reglas ni IA.
+Implementar únicamente R0. No iniciar Q2.3, métricas físicas, facturación, UI ni nuevas integraciones hasta que el PR correctivo pase todos los checks y sea revisado por un humano.
