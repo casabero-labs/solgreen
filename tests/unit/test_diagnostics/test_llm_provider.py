@@ -9,7 +9,9 @@ from solgreen.diagnostics.llm_input import LLMEpisodeInput
 from solgreen.diagnostics.llm_output import LLMInterpretation
 from solgreen.diagnostics.llm_provider import (
     DeepSeekProvider,
+    FallbackProvider,
     LLMProvider,
+    MiniMaxProvider,
     _parse_response,
     interpret_episode,
 )
@@ -169,3 +171,48 @@ def test_interpret_episode_llm_error_propagates() -> None:
     input_data = _make_input_data()
     with pytest.raises(RuntimeError, match="API timeout"):
         interpret_episode(provider, input_data)
+
+
+def test_minimax_provider_properties() -> None:
+    provider = MiniMaxProvider(api_key="test-key", model="custom-model")
+    assert provider.provider_name == "minimax"
+    assert provider.default_model == "MiniMax-Text-01"
+
+
+def test_fallback_uses_primary_when_successful() -> None:
+    primary = MockProvider(response=VALID_RESPONSE)
+    fallback = MockProvider(response="should not be used")
+    fb = FallbackProvider(primary=primary, fallback=fallback)
+    result = fb.complete("prompt")
+    assert fb.provider_name == "mock"
+    assert fb.used_fallback is False
+    input_data = _make_input_data()
+    result = interpret_episode(fb, input_data)
+    assert result.provider == "mock"
+
+
+def test_fallback_uses_fallback_when_primary_fails() -> None:
+    class FailingPrimary(MockProvider):
+        def complete(self, prompt: str, *, max_tokens: int = 2000) -> str:
+            raise RuntimeError("primary timeout")
+
+    primary = FailingPrimary(response="fail")
+    fallback = MockProvider(response=VALID_RESPONSE)
+    fb = FallbackProvider(primary=primary, fallback=fallback)
+    result = fb.complete("prompt")
+    assert result == VALID_RESPONSE
+    assert fb.used_fallback is True
+    assert fb.provider_name == "mock"
+
+
+def test_fallback_propagates_fallback_failure() -> None:
+    class AlwaysFails(MockProvider):
+        def complete(self, prompt: str, *, max_tokens: int = 2000) -> str:
+            raise RuntimeError("api error")
+
+    primary = AlwaysFails()
+    fallback = AlwaysFails()
+    fb = FallbackProvider(primary=primary, fallback=fallback)
+    with pytest.raises(RuntimeError, match="api error"):
+        fb.complete("prompt")
+    assert fb.used_fallback is True

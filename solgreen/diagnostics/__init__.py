@@ -2,7 +2,9 @@ from solgreen.diagnostics.llm_input import LLMEpisodeInput
 from solgreen.diagnostics.llm_output import Hypothesis, LLMInterpretation
 from solgreen.diagnostics.llm_provider import (
     DeepSeekProvider,
+    FallbackProvider,
     LLMProvider,
+    MiniMaxProvider,
     interpret_episode,
 )
 from solgreen.diagnostics.llm_validator import validate_interpretation
@@ -15,10 +17,12 @@ __all__ = [
     "SEED_RULES",
     "SEVERITY_ORDER",
     "DeepSeekProvider",
+    "FallbackProvider",
     "Hypothesis",
     "LLMEpisodeInput",
     "LLMInterpretation",
     "LLMProvider",
+    "MiniMaxProvider",
     "Rule",
     "RuleCatalog",
     "RuleExecution",

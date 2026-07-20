@@ -62,6 +62,10 @@ def _build_llm_provider(
     provider_name: str | None,
     model: str | None,
     api_key: str | None,
+    *,
+    fallback_provider_name: str | None = None,
+    fallback_model: str | None = None,
+    fallback_api_key: str | None = None,
 ) -> LLMProvider | None:
     if provider_name is None or provider_name == "none":
         return None
@@ -69,10 +73,32 @@ def _build_llm_provider(
         raise typer.BadParameter(
             f"--llm-api-key required for provider '{provider_name}'"
         )
-    if provider_name == "deepseek":
-        from solgreen.diagnostics.llm_provider import DeepSeekProvider
+
+    from solgreen.diagnostics.llm_provider import FallbackProvider
+
+    provider = _instantiate_provider(provider_name, api_key, model)
+    if not fallback_provider_name or fallback_provider_name == "none":
+        return provider
+    if fallback_api_key is None:
+        raise typer.BadParameter(
+            f"--llm-fallback-api-key required for fallback provider '{fallback_provider_name}'"
+        )
+    fallback = _instantiate_provider(fallback_provider_name, fallback_api_key, fallback_model)
+    return FallbackProvider(primary=provider, fallback=fallback)
+
+
+def _instantiate_provider(
+    name: str,
+    api_key: str,
+    model: str | None,
+) -> LLMProvider:
+    from solgreen.diagnostics.llm_provider import DeepSeekProvider, MiniMaxProvider
+
+    if name == "minimax":
+        return MiniMaxProvider(api_key=api_key, model=model)
+    if name == "deepseek":
         return DeepSeekProvider(api_key=api_key, model=model)
-    raise typer.BadParameter(f"Unknown LLM provider: {provider_name}")
+    raise typer.BadParameter(f"Unknown LLM provider: {name}")
 
 
 @app.callback()
@@ -213,10 +239,41 @@ def import_file(
             help="LLM API key. Required when --llm-provider is set.",
         ),
     ] = None,
+    llm_fallback_provider: Annotated[
+        str | None,
+        typer.Option(
+            "--llm-fallback-provider",
+            envvar="SOLGREEN_LLM_FALLBACK_PROVIDER",
+            help="Fallback LLM provider if primary fails (e.g. 'deepseek').",
+        ),
+    ] = None,
+    llm_fallback_model: Annotated[
+        str | None,
+        typer.Option(
+            "--llm-fallback-model",
+            envvar="SOLGREEN_LLM_FALLBACK_MODEL",
+            help="Fallback LLM model override.",
+        ),
+    ] = None,
+    llm_fallback_api_key: Annotated[
+        str | None,
+        typer.Option(
+            "--llm-fallback-api-key",
+            envvar="SOLGREEN_LLM_FALLBACK_API_KEY",
+            help="Fallback LLM API key.",
+        ),
+    ] = None,
 ) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     repo = None if no_db else _build_repository(db_url)
-    provider = _build_llm_provider(llm_provider_name, llm_model, llm_api_key)
+    provider = _build_llm_provider(
+        llm_provider_name,
+        llm_model,
+        llm_api_key,
+        fallback_provider_name=llm_fallback_provider,
+        fallback_model=llm_fallback_model,
+        fallback_api_key=llm_fallback_api_key,
+    )
 
     if align_with is not None:
         _import_with_align(file, align_with, plant_id, output_dir, tolerance, repo, provider)
