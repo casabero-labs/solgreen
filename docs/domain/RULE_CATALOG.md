@@ -1,6 +1,8 @@
 # Catálogo inicial de reglas
 
-Las reglas son determinísticas, versionadas y parametrizadas por perfil de planta.
+Las reglas son determinísticas, versionadas y parametrizadas por perfil de planta, red o tarifa.
+
+## Reglas técnicas y de calidad
 
 | ID | Nombre | Señales principales | Resultado |
 |---|---|---|---|
@@ -32,18 +34,72 @@ Las reglas son determinísticas, versionadas y parametrizadas por perfil de plan
 | INV-005 | BUS anómalo | BUS positivo/negativo | electrónica DC interna |
 | CORR-001 | Episodio multicapa | reglas cercanas | correlación de eventos |
 
+## Reglas económicas y de consumo planificadas
+
+Estas reglas producen **estado económico u oportunidad**, no severidad eléctrica. No deben elevar o reducir el riesgo técnico de un episodio.
+
+| ID | Nombre | Inputs principales | Resultado |
+|---|---|---|---|
+| BILL-001 | Perfil tarifario ausente o vencido | ciclo, vigencia, fuente | cálculo monetario bloqueado o histórico |
+| BILL-002 | Discrepancia de conciliación | kWh SolarMAN, kWh factura, cobertura | revisión de conciliación |
+| BILL-003 | Cruce del bloque subsidiable | consumo acumulado, perfil | cambio de costo marginal esperado |
+| BILL-004 | Línea de factura no reconciliada | líneas, fórmula, total | revisión documental |
+| BILL-005 | Forecast con incertidumbre alta | cobertura, baseline, días restantes | forecast degradado o bloqueado |
+| CONS-001 | Ventana de alta importación | importación horaria, percentiles | franja crítica de compra |
+| CONS-002 | Agotamiento temprano de batería | SOC, descarga, importación posterior | cadena causal compatible |
+| CONS-003 | Carga desplazable candidata | carga, FV, batería, catálogo | oportunidad a evaluar |
+| CONS-004 | Consumo base nocturno elevado | carga nocturna, baseline | oportunidad de auditoría |
+| CONS-005 | Cambio de hábito | perfil reciente vs histórico | desviación de consumo |
+| LOAD-001 | Ventana solar recomendada | forecast FV, carga, SOC, duración | recomendación candidata |
+| LOAD-002 | Reserva de batería comprometida | escenario, reserva, incertidumbre | recomendación bloqueada |
+| LOAD-003 | Riesgo de pico coincidente | equipos, arranque, límite | separar o bloquear cargas |
+| LOAD-004 | Restricción humana incumplida | horario, supervisión, prioridad | recomendación bloqueada |
+| LOAD-005 | Beneficio económico no positivo | baseline, escenario, tarifa | no recomendar por ahorro |
+| SIM-001 | Delta de escenario | baseline, escenario, versiones | impacto energético/económico |
+| SIM-002 | Escenario incompatible | perfiles, límites, modo operativo | escenario bloqueado |
+
+## Dimensiones separadas
+
+Todo resultado declara dimensiones independientes:
+
+- `electrical_severity`;
+- `data_quality`;
+- `evidence_confidence`;
+- `economic_impact`;
+- `recommendation_confidence`.
+
+Ejemplos:
+
+- una factura alta puede tener impacto económico alto y severidad eléctrica nula;
+- una caída PV puede tener severidad técnica alta y costo económico pequeño;
+- una recomendación atractiva con datos incompletos debe tener confianza baja;
+- un perfil vencido bloquea COP vigente aunque los kWh sean confiables.
+
 ## Contrato de regla
 
 Cada regla declara:
 
 - ID y versión;
-- pregunta técnica;
-- señales requeridas y opcionales;
+- familia: técnica, calidad, económica, consumo, recomendación o simulación;
+- pregunta técnica o económica;
+- señales y entidades requeridas y opcionales;
 - precondiciones de calidad;
 - parámetros y fuente;
 - algoritmo;
 - evidencias producidas;
-- severidad base;
+- dimensión de salida;
+- severidad base o impacto, según familia;
 - falsos positivos conocidos;
 - casos válidos e inválidos;
-- tests de regresión.
+- tests de regresión;
+- fecha de caducidad cuando dependa de forecast o tarifa.
+
+## Guardrails económicos
+
+- `BILL-*` nunca acusa fraude o error de facturación automáticamente.
+- `CONS-*` no identifica electrodomésticos sin evidencia por circuito o dispositivo.
+- `LOAD-*` no modifica equipos ni configuración.
+- `LOAD-*` debe aplicar reserva, límites, confort y supervisión.
+- `SIM-*` conserva baseline inmutable.
+- Toda cifra monetaria cita `tariff_profile_id` y vigencia.
+- Toda recomendación expresa ahorro como intervalo y supuestos.
