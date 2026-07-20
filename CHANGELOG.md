@@ -4,6 +4,23 @@ Todas las versiones siguen [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### U0 — Línea unificada y frontend Showcase Ink
+
+- R0 fusionado como baseline estable.
+- Desarrollo consolidado en `develop/solgreen-unified` con un solo PR activo.
+- PR económico #8 cerrado como supersedido y fundación E0 absorbida.
+- Dominio, ADR, diccionario Afinia, workflows, perfil histórico y test plan económico integrados.
+- Primera aplicación `apps/web` con React, TypeScript, Vite y D3.
+- Navegación Planta, Datos y Economía.
+- Periodos demostrativos 24h, 7d y 30d.
+- Modo oscuro global.
+- Gráfica D3 con tabla alternativa accesible.
+- Datos demo persistentemente identificados.
+- Bloqueo explícito de COP sin perfil tarifario vigente.
+- Acción de importación web deshabilitada hasta contar con API y E2E Human-First.
+- Arquitectura y test plan frontend añadidos.
+- CI ampliada con typecheck, tests, build y guardas Showcase Ink.
+
 ### Reconciliation R0
 
 - Auditoría del estado real frente a `estandar-casabero`.
@@ -11,7 +28,7 @@ Todas las versiones siguen [Semantic Versioning](https://semver.org/).
 - Timeline, episodios, reglas, IA, persistencia y deploy reclasificados según evidencia.
 - Reglas seed marcadas como catálogo experimental hasta contar con evaluadores determinísticos.
 - IA bloqueada para diagnóstico real mientras no existan evidencias estructuradas y reglas evaluadas.
-- PR económico #8 reconocido como divergido y pendiente de rebase.
+- CI documental y privacidad restauradas.
 
 ### Riesgos conocidos
 
@@ -19,6 +36,8 @@ Todas las versiones siguen [Semantic Versioning](https://semver.org/).
 - El motor de métricas físicas aún no existe.
 - Los golden cases del 17 y 19 de julio todavía no se ejecutan en CI.
 - La persistencia y el deploy requieren evidencia operativa documentada.
+- El frontend U0 usa datos demostrativos y aún no consume la API.
+- El perfil Afinia versionado en Git es referencia histórica, no tarifa vigente.
 
 ## [0.1.0] - 2026-07-20
 

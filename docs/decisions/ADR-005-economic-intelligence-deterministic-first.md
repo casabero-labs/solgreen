@@ -2,7 +2,7 @@
 
 ## Estado
 
-Propuesto para aceptación mediante el PR de fundación económica.
+Aceptado en la línea unificada U0. La implementación se ejecuta en U5 y depende de métricas físicas y contratos de calidad validados.
 
 ## Contexto
 
@@ -102,15 +102,24 @@ Rechazada porque ignora reserva nocturna, potencia de arranque, duración, confo
 - proveedor IA reemplazable;
 - funcionamiento sin IA;
 - separación entre riesgo técnico y economía;
-- evolución incremental sin tocar el importador L1.
+- evolución incremental dentro de la línea única.
 
 ## Consecuencias negativas
 
 - más contratos y versionado;
 - requiere perfiles tarifarios mantenidos;
-- necesita L2-L4 antes de recomendaciones confiables;
+- necesita U1–U3 antes de recomendaciones confiables;
 - las recomendaciones iniciales serán conservadoras;
 - reconciliación perfecta no siempre será posible.
+
+## Dependencias en la línea unificada
+
+- U1 garantiza calidad y semántica;
+- U2 produce energía y perfiles físicos;
+- U4 habilita los flujos web Human-First;
+- U5 implementa el motor económico;
+- U6 permite explicación IA validada;
+- U7 genera reportes y operación verificable.
 
 ## Revalidación
 

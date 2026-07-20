@@ -1,145 +1,197 @@
-# Plan ejecutable
+# Plan ejecutable — Solgreen
 
-## Baseline auditado
+## Baseline estable
 
 - Rama: `main`
-- SHA: `94a66407e258990bbf9d7ed347a86d9cf529caf5`
-- Fecha: 2026-07-20
+- SHA de reconciliación R0: `1f70674f0a0d835c8933dc23f38f46f798a6facb`
 - Auditoría: [`../qa_reports/DEVELOPMENT_AUDIT_2026-07-20.md`](../qa_reports/DEVELOPMENT_AUDIT_2026-07-20.md)
 
-## Resumen del avance real
+## Línea activa
 
-### Cerrado
+- Rama: `develop/solgreen-unified`
+- Epic: #26
+- Política: un solo PR activo contra `main`
+- Roadmap: [`UNIFIED_DEVELOPMENT_LINE.md`](UNIFIED_DEVELOPMENT_LINE.md)
 
-- I1 — importación reproducible de ambos formatos SolarMAN;
-- hashing, normalización temporal, fixtures y CLI básica.
+El PR económico #8 fue cerrado como supersedido. Su fundación E0 fue absorbida en esta línea y no continúa como pista separada.
 
-### Parcial
+## Estado actual
 
-- Q2 — orden, duplicados, huecos y score básico;
-- T3 — muestra canónica y join por tolerancia;
-- P8 — persistencia PostgreSQL inicial;
-- O11 — Docker, health y workflow de deploy.
+### Verificado en main
 
-### Prototipo o catálogo
+- importación CSV/XLSX de ambos formatos SolarMAN;
+- contratos de datos y catálogo de señales;
+- calidad básica;
+- timeline por tolerancia como prototipo;
+- PostgreSQL inicial;
+- API health básica;
+- CI, privacidad y estado documental reconciliados.
 
-- agrupador temporal denominado episodio;
-- catálogo seed de reglas;
-- proveedores MiniMax/DeepSeek;
-- prompt y validador LLM.
+### Absorbido en la línea unificada
 
-### No iniciado
+- dominio de inteligencia económica;
+- ADR deterministic-first;
+- diccionario de factura Afinia;
+- workflows económicos;
+- perfil histórico de ejemplo marcado como no vigente;
+- test plan económico;
+- arquitectura frontend Showcase Ink;
+- primera aplicación React + D3 con datos demo.
 
-- métricas físicas;
-- detectores científicos de eventos;
-- evaluadores reales de reglas;
-- golden cases del 17 y 19;
-- UI D3;
-- PDF técnico;
-- motor de factura Afinia.
+### Bloqueado o pendiente
 
-## Próximo loop obligatorio
+- semántica correcta de cero y status;
+- plausibilidad física avanzada;
+- integración de energía;
+- eventos científicos;
+- evaluadores determinísticos;
+- golden cases privados;
+- endpoints de frontend;
+- motor tarifario;
+- IA validada;
+- PDF y deploy verificable.
 
-# R0 — Development reconciliation and safety gate
+## Loop activo U0
 
-## Goal
+### Goal
 
-Restablecer coherencia entre documentación y código, evitar falsos diagnósticos y recuperar validación continua.
+Entregar la fundación integrada y un frontend ejecutable, accesible y honesto sobre su estado.
 
-## Scope
+### Checklist
 
-- estado documental;
-- CI documental y privacidad;
-- seguridad de reglas seed;
-- semántica de cero FV;
-- estado textual del inversor;
-- bloqueo de IA sin evidencia evaluada;
-- tratamiento del PR #8 divergido.
+- [x] R0 fusionado;
+- [x] una rama unificada creada;
+- [x] PR #8 cerrado como supersedido;
+- [x] economía E0 absorbida;
+- [x] epic único creado;
+- [x] frontend React + TypeScript + D3 construido;
+- [x] tokens Showcase Ink aplicados;
+- [x] datos demo etiquetados;
+- [x] COP vigente bloqueado;
+- [x] importación web falsa evitada;
+- [x] tabla alternativa para gráfica;
+- [ ] CI frontend en verde;
+- [ ] CI Python y documentación en verde sobre el PR;
+- [ ] revisión humana U0;
+- [ ] cierre documental U0.
 
-## Out of scope
+## Correcciones permitidas durante U0
 
-- nuevas reglas científicas;
-- métricas de energía;
-- UI;
-- D3;
-- facturación;
+Solo fallos objetivos de:
+
+- TypeScript;
+- tests frontend;
+- build Vite;
+- CI Python;
+- enlaces o archivos documentales;
+- accesibilidad básica;
+- coherencia con Showcase Ink;
+- contradicciones entre estado y código.
+
+No iniciar todavía:
+
+- carga web real;
+- endpoints nuevos;
+- motor de energía;
+- reglas nuevas;
+- cálculos de factura;
+- llamadas LLM desde la UI;
 - PDF;
-- cambios de esquema grandes;
-- control del inversor.
+- deploy.
 
-## Stop conditions
+## Siguiente loop U1
 
-| Condición | Estado inicial |
-|---|---|
-| README, CHANGELOG, NEXT_STEPS y LOOP_REGISTRY coinciden | FAIL |
-| CI corre también en cambios documentales | FAIL |
-| reglas no se activan por mera presencia | FAIL |
-| cero FV permanece cero | FAIL |
-| estado textual permanece en muestras merged | FAIL |
-| IA no recibe reglas no evaluadas | FAIL |
-| PR económico no puede fusionarse accidentalmente | FAIL |
-| ruff, format, mypy y pytest pasan | PENDING |
+### Goal
 
-## Human gate
+Limpiar la semántica y calidad de los datos antes de producir métricas o conectar la UI.
 
-No hacer merge automático. El propietario revisa el PR correctivo y autoriza el cierre de R0.
+### Entregables
 
-## Después de R0
-
-### Q2.3 — Plausibilidad física y calidad avanzada
-
-Entregables:
-
-- salto SOC físicamente improbable;
-- temperatura imposible;
-- frecuencia y voltaje plausibles;
-- signo contradictorio;
+- conservar `0.0` como medición válida;
+- conservar estado textual en muestras merged;
+- distinguir ausencia, cero, no aplicable y suprimido;
+- lote vacío no obtiene score perfecto;
 - huecos ponderados por duración;
-- cobertura temporal;
-- score que no considere perfecto un lote vacío;
-- tests sintéticos de regresión.
+- saltos SOC imposibles;
+- temperaturas, frecuencia y voltajes plausibles;
+- signos contradictorios;
+- consistencia entre fuentes;
+- parser ISO de tolerancia correcto (#24);
+- formato global normalizado (#25).
 
-### M4.1 — Energía y balance
+### Stop conditions
 
-Depende de Q2.3 y T3:
+- #21 resuelto;
+- #24 resuelto;
+- #25 resuelto;
+- fixtures positivos y negativos pasan;
+- documentación coincide;
+- frontend puede confiar en el contrato de calidad sin excepciones ocultas.
 
-- integración temporal de W a Wh/kWh;
-- tratamiento explícito de huecos;
-- balance por ventana;
-- residual y confianza;
-- fixtures con resultados manuales conocidos.
+## Después de U1
 
-### E5.1 — Eventos científicos
+### U2 — Energía y métricas
 
-Depende de M4:
+- W→Wh/kWh por duración real;
+- huecos explícitos;
+- importación/exportación;
+- batería;
+- balance y residual;
+- cobertura y confianza;
+- perfiles horarios locales.
 
-- detector de dropout FV;
-- pérdida y retorno de red;
-- SOC bajo;
-- inicializaciones repetidas;
+### U3 — Eventos y reglas
+
+- segmentos separados de eventos;
 - ventanas antes/durante/después;
-- golden cases del 17 y 19.
+- dropout FV;
+- pérdida y retorno de red;
+- descarga profunda y reinicios;
+- evaluadores determinísticos (#20);
+- evidencia estable;
+- golden 17 y 19.
 
-### R6.1 — Evaluadores determinísticos
+### U4 — Frontend conectado
 
-Cada regla debe tener algoritmo, parámetros, evidencia, falsos positivos y tests. La presencia de una señal nunca equivale a activación.
+- contratos API;
+- importación con progreso real;
+- timeline D3;
+- filtros persistentes;
+- episodios y evidencia;
+- Playwright Human-First;
+- estados parciales y errores accionables.
 
-### A7.1 — IA validada
+### U5 — Economía Afinia
 
-Solo después de R6.1:
+- perfiles tarifarios;
+- factura normalizada;
+- motor tarifario;
+- subsidio parametrizado;
+- conciliación;
+- P10/P50/P90;
+- perfiles horarios;
+- recomendaciones y escenarios.
 
-- evidence IDs estables;
+### U6 — IA validada
+
+- resolver #22;
+- IDs de evidencia;
 - exact coverage;
-- rechazo de referencias inexistentes;
-- rechazo de causas confirmadas;
-- prompts versionados;
-- consenso opcional;
-- tests adversariales.
+- rechazo de cifras y referencias nuevas;
+- registro de proveedor, modelo y fallback;
+- cero persistencia de respuestas inválidas.
 
-### ECO — Rebase de inteligencia económica
+### U7 — Reportes y operación
 
-El PR #8 no debe fusionarse tal como está. Después de R0 debe recrearse desde main y conservar únicamente la fundación económica compatible.
+- PDF técnico;
+- privacidad;
+- deploy Coolify;
+- polling;
+- SHA del contenedor;
+- health y smoke;
+- rollback;
+- evidencia operativa.
 
-## Próximo prompt ejecutable
+## Próximo paso exacto
 
-Implementar únicamente R0. No iniciar Q2.3, métricas físicas, facturación, UI ni nuevas integraciones hasta que el PR correctivo pase todos los checks y sea revisado por un humano.
+Crear el único PR draft desde `develop/solgreen-unified`, ejecutar CI completa y corregir únicamente los fallos de U0 hasta obtener verde y revisión humana.

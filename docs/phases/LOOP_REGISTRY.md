@@ -8,100 +8,152 @@ Solgreen aplica `casabero-labs/estandar-casabero`:
 DISCOVER → PLAN → EXECUTE → VERIFY → ITERATE → CLOSEOUT
 ```
 
-Cada loop debe declarar `GOAL`, `CONTEXT`, `ACTION`, `FEEDBACK`, `STOP CONDITION`, `HUMAN GATE`, `ROLLBACK` y próximo paso exacto.
+Cada loop declara `GOAL`, `CONTEXT`, `ACTION`, `FEEDBACK`, `STOP CONDITION`, `HUMAN GATE`, `ROLLBACK` y próximo paso exacto.
+
+## Gobernanza de desarrollo
+
+```text
+main → develop/solgreen-unified → un único PR activo
+```
+
+- `main` es la fuente estable.
+- La rama unificada integra todas las capacidades.
+- Los issues son loops o bloqueadores, no ramas alternativas.
+- No abrir pistas paralelas de frontend, economía, diagnóstico o IA.
+- Documento canónico: [`UNIFIED_DEVELOPMENT_LINE.md`](UNIFIED_DEVELOPMENT_LINE.md).
 
 ## Feedback disponible
 
-- schemas de los dos datasets;
+- schemas SolarMAN;
 - fixtures sintéticos;
-- datasets privados iniciales fuera de Git;
-- episodios dorados del 17 y 19 de julio;
-- pruebas unitarias e integración;
+- datasets y facturas privadas fuera de Git;
+- golden cases del 17 y 19 de julio;
+- tests Python y frontend;
 - CI;
-- revisión humana del propietario;
-- diagnóstico posterior del instalador.
+- revisión Human-First;
+- revisión del propietario;
+- diagnóstico del instalador;
+- perfiles oficiales cuando estén disponibles.
 
 ## Comandos de verificación
+
+### Backend
 
 ```bash
 uv sync --extra dev --frozen
 uv run ruff check .
-uv run ruff format --check .
 uv run mypy solgreen
 uv run pytest
+```
+
+### Frontend
+
+```bash
+cd apps/web
+npm install --no-audit --no-fund
+npm run typecheck
+npm run test
+npm run build
 ```
 
 ## Human gates
 
 - perfil real de planta;
-- límites de batería y red;
+- signos de red y batería;
+- límites de batería, inversor y red;
 - severidad crítica;
 - confirmación de causa;
-- aprobación de umbrales;
+- perfil tarifario vigente;
+- corrección de factura extraída;
 - merge;
 - reportes compartidos;
-- deploy automático;
-- cualquier capacidad de escritura sobre equipos.
+- deploy;
+- cualquier escritura sobre equipos;
+- cierre de flujos críticos de UI.
 
-## Límites de iteración
+## Estado oficial unificado
 
-- un solo objetivo verificable por loop;
-- máximo tres correcciones automáticas antes de escalar;
-- no mezclar feature, refactor y deploy si pueden separarse;
-- ningún loop se cierra si docs, tests y código se contradicen.
-
-## Estado oficial
-
-| Track | Objetivo | Feedback | Stop condition | Estado |
+| Loop | Objetivo | Feedback principal | Stop condition | Estado |
 |---|---|---|---|---|
-| F0 | Fundamentos y contratos | revisión documental | cero contradicciones críticas | NEEDS_RECONCILIATION |
-| I1 | Importación reproducible | parser/hash/tests | ambos formatos reproducibles | CLOSED |
-| Q2 | Calidad de datos | tests de calidad | plausibilidad y cobertura verificadas | PARTIAL |
-| T3 | Timeline canónico | tests de join/lineage | cada valor rastreable a ambas fuentes | PARTIAL |
-| M4 | Métricas físicas | fixtures y fórmulas | energía, balance, batería, PV y red validados | NOT_STARTED |
-| E5 | Eventos y episodios | golden cases | 17 y 19 reconstruidos | PROTOTYPE_ONLY |
-| R6 | Reglas determinísticas | tests por regla | condición real evaluada, no presencia de señal | CATALOG_ONLY |
-| A7 | IA validada | schema, refs y adversarial tests | cero respuestas inválidas aceptadas | EXPERIMENTAL_BLOCKED |
-| P8 | Persistencia | integración PostgreSQL | lineage, idempotencia y migraciones probadas | PARTIAL |
-| U9 | UI y D3 | E2E humano | exploración completa y accesible | NOT_STARTED |
-| G10 | Reportes | golden PDF | instalador audita cada hallazgo | NOT_STARTED |
-| O11 | Operación | deploy + SHA + health | restore y smoke documentados | PARTIAL_UNVERIFIED |
-| ECO | Afinia y gestión de cargas | golden billing | factura y horarios reproducibles | DESIGNED_NOT_MERGED |
+| R0 | Reconciliar baseline y safety gates | CI y auditoría | estado documental coincide con código | CLOSED |
+| U0 | Integrar economía y frontend Showcase Ink | TS, Vitest, build, docs | primera vertical ejecutable y honesta | ACTIVE |
+| U1 | Calidad avanzada y semántica | fixtures y tests | cero, status, plausibilidad y cobertura correctos | PLANNED |
+| U2 | Energía y métricas físicas | fórmulas y golden manuales | W→kWh y balance reproducibles | PLANNED |
+| U3 | Eventos, reglas y evidencia | golden 17/19 | eventos científicos y reglas reales | PLANNED |
+| U4 | Frontend conectado | Playwright Human-First | carga, timeline y episodios utilizables | PLANNED |
+| U5 | Afinia, cargas y escenarios | golden billing | factura y horarios reproducibles | FOUNDATION_ABSORBED |
+| U6 | IA validada | adversarial tests | cero respuesta inválida aceptada | BLOCKED_BY_U3 |
+| U7 | PDF y operación | deploy, SHA, health | flujo desplegado y reversible | PLANNED |
 
-## Loop correctivo activo
+## Bloqueadores vinculados
 
-### R0 — Development reconciliation and safety gate
+- #20: evaluadores determinísticos;
+- #21: semántica del timeline y eventos;
+- #22: evidencias y validador IA;
+- #24: parser ISO de duración;
+- #25: baseline global de formato;
+- #26: epic de línea unificada.
 
-**GOAL:** alinear estado documental y código, bloquear falsos diagnósticos y restaurar feedback de CI.
+## Loop activo
 
-**CONTEXT:** auditoría 2026-07-20, PRs #9–#19, PR #8, estándares Casabero.
+# U0 — Fundación unificada + Showcase Ink
 
-**ACTION:**
+## Goal
 
-1. reconciliar README, CHANGELOG, NEXT_STEPS y este registro;
-2. restaurar validación documental y de privacidad;
-3. impedir que una regla se active solo porque una señal existe;
-4. conservar cero medido y estados textuales;
-5. bloquear IA cuando no exista evidencia evaluada;
-6. dejar la pista económica pendiente de rebase.
+Unificar el producto y entregar una primera vertical frontend ejecutable sin fingir conexión con capacidades aún no disponibles.
 
-**FEEDBACK:** ruff, format, mypy, pytest, cobertura, CI documental y revisión del PR.
+## Context
 
-**STOP CONDITION:** documentación y código describen el mismo estado y ninguna salida experimental puede presentarse como diagnóstico real.
+- R0 fusionado en `main`;
+- antiguo PR #8 cerrado como supersedido;
+- economía E0 absorbida;
+- frontend inexistente en el baseline;
+- Showcase Ink como estándar visual obligatorio.
 
-**HUMAN GATE:** merge del PR correctivo y decisión sobre rebase del PR #8.
+## Action
 
-**ROLLBACK:** cerrar el PR sin merge; `main` permanece intacta.
+1. mantener una sola rama y PR activos;
+2. absorber dominio, ADR, workflows y test plan económico;
+3. crear `apps/web` con React, TypeScript, Vite y D3;
+4. implementar navegación Planta, Datos y Economía;
+5. mostrar datos demo con advertencia persistente;
+6. añadir gráfica y tabla alternativa;
+7. bloquear COP sin perfil vigente;
+8. bloquear importación web hasta U4 con razón legible;
+9. añadir arquitectura y QA frontend;
+10. ejecutar CI backend, frontend, documentación y privacidad.
 
-## Próximo loop después de R0
+## Feedback
 
-### Q2.3 — Plausibilidad física y calidad avanzada
+- TypeScript strict;
+- Vitest;
+- Vite build;
+- Ruff;
+- mypy;
+- pytest;
+- validación documental;
+- revisión visual y human-first del alcance.
 
-- saltos SOC;
-- temperaturas imposibles;
-- signos contradictorios;
-- huecos ponderados por duración;
-- lote vacío no perfecto;
-- consistencia básica entre fuentes.
+## Stop condition
 
-No avanzar a UI, facturación o diagnósticos IA hasta cerrar M4, E5 y R6 con golden cases.
+- un solo PR de producto abierto;
+- CI verde;
+- frontend navega y cambia periodo;
+- modo oscuro funciona;
+- datos demo no parecen reales;
+- no aparece COP vigente;
+- D3 tiene tabla alternativa;
+- documentación coincide con la implementación;
+- economía E0 existe en la rama unificada.
+
+## Human gate
+
+El propietario revisa jerarquía, navegación y honestidad del alcance. U0 no valida todavía una planta real.
+
+## Rollback
+
+Cerrar el PR unificado. `main` conserva R0.
+
+## Próximo loop exacto
+
+U1: resolver semántica de cero y estados, plausibilidad avanzada, parser ISO y baseline de formato antes de calcular energía o conectar el frontend.
