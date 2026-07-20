@@ -71,7 +71,16 @@ jobs:
           retention-days: 7
 
       - name: Format check
-        run: uv run ruff format --check .
+        run: uv run ruff format --check --diff . > ruff-format.diff
+
+      - name: Upload Ruff format diff
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ruff-format-diff
+          path: ruff-format.diff
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Type check
         run: uv run mypy solgreen
