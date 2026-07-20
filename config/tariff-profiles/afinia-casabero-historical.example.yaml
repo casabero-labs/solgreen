@@ -1,0 +1,62 @@
+profileVersion: 0.1.0
+provider: afinia
+name: afinia-casabero-historical-example
+status: historical_reference
+currency: COP
+warning: >-
+  Referencia histórica para tests privados. No representa una tarifa vigente ni
+  debe utilizarse para proyectar periodos futuros.
+territory:
+  country: CO
+  department: Cordoba
+  municipality: Cienaga de Oro
+  tariffZone: pending_official_confirmation
+customerSegment:
+  serviceUse: residential
+  stratum: 2
+  altitudeBand: below_1000_m_historical_assumption
+periods:
+  - id: hist-2026-04-15_2026-05-15
+    validFrom: 2026-04-15
+    validTo: 2026-05-16
+    observedEnergyKwh: 645
+    energyChargeCopPerKwh: 960.12
+    subsidyPolicy:
+      method: discount_per_kwh
+      eligibleLimitKwh: 173
+      observedDiscountCopPerKwh: 337.98
+      observedSubsidyCop: 58470.54
+      authority: observed_invoice_private_golden
+    observedCharges:
+      energySubtotalCop: 560810
+      wasteCollectionCop: 27750
+      publicLightingCop: 37160
+      invoiceTotalCop: 625720
+  - id: hist-2026-05-15_2026-06-16
+    validFrom: 2026-05-15
+    validTo: 2026-06-17
+    observedEnergyKwh: 694
+    energyChargeCopPerKwh: 934.36
+    subsidyPolicy:
+      method: discount_per_kwh
+      eligibleLimitKwh: 173
+      observedDiscountCopPerKwh: 307.35
+      observedSubsidyCop: 53171.55
+      authority: observed_invoice_private_golden
+    observedCharges:
+      energySubtotalCop: 595270
+      wasteCollectionCop: 27840
+      publicLightingCop: 38900
+      invoiceTotalCop: 662010
+roundingPolicy:
+  storage: cop_cents_integer
+  display: nearest_peso
+  calculation: preserve_decimal_until_line_rounding
+source:
+  authority: private_historical_invoice
+  originalsCommittedToGit: false
+  verificationStatus: requires_private_fixture
+notes:
+  - The 173 kWh value is historical for these fixtures and is not universal.
+  - Observed invoice values are regression targets, not regulatory authority.
+  - Current profiles require official source, effective dates and human verification.
