@@ -26,26 +26,23 @@ dev = [
     "mypy>=1.13,<2",
     "types-openpyxl>=3.1.5.20260518",
     "types-python-dateutil>=2.9.0.20260716",
+    "types-pyyaml>=6.0.12.20260518",
 ]
 
 [project.scripts]
-solgreen = "solgreen.cli:app"
+solgreen = "solgreen.cli:main"
 
 [build-system]
 requires = ["setuptools>=75"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-where = ["src"]
 include = ["solgreen*"]
-
-[tool.setuptools.package-dir]
-"" = "src"
 
 [tool.ruff]
 line-length = 100
 target-version = "py312"
-extend-exclude = ["artifacts", ".venv", "build", "dist"]
+extend-exclude = ["artifacts", ".venv", "build", "dist", "tests/fixtures"]
 
 [tool.ruff.lint]
 select = [
@@ -75,7 +72,6 @@ indent-style = "space"
 [tool.pytest.ini_options]
 minversion = "8.3"
 testpaths = ["tests"]
-pythonpath = ["src"]
 addopts = [
     "-ra",
     "--strict-markers",
