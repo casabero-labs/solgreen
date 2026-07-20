@@ -1,13 +1,14 @@
-import pytest
-from datetime import datetime, timedelta, UTC
+from datetime import UTC, datetime, timedelta
 
+import pytest
+
+from solgreen.contracts.enums import SourceType
 from solgreen.quality._types import (
     DuplicateTimestamp,
     OrderingInfo,
     QualityResult,
     TemporalGap,
 )
-from solgreen.contracts.enums import SourceType
 
 
 class TestDuplicateTimestamp:

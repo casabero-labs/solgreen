@@ -1,9 +1,13 @@
-from datetime import datetime, timedelta, UTC
+from datetime import UTC, datetime, timedelta
 
 from solgreen.contracts.inverter_telemetry import InverterTelemetrySample
 from solgreen.contracts.plant_flow import PlantFlowSample
 from solgreen.contracts.validity import ValidityFlags
-from solgreen.timeline.join import join_by_tolerance, _pv_power, _compute_confidence, DEFAULT_TOLERANCE
+from solgreen.timeline.join import (
+    _compute_confidence,
+    _pv_power,
+    join_by_tolerance,
+)
 
 
 def _flow(ts: datetime, **kwargs: object) -> PlantFlowSample:
