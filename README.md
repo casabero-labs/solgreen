@@ -64,20 +64,41 @@ Los datasets reales no se versionan en Git. Se usarán fixtures sintéticos y ha
 
 ## Estado
 
-**Loop L1 — Importación reproducible** en curso (PR por iteración). L0 foundation freeze cerrado.
+**Loop L1 — Importación reproducible CERRADO** (5 PRs mergeados, ver `CHANGELOG.md`).
+
+L2 — Data quality (huecos, duplicados, SOC imposible) pendiente.
+L3+ — Timeline canónico, métricas físicas, reglas, episodios, IA, UI, deploy. Ver `docs/phases/LOOP_REGISTRY.md`.
+
+## Uso
+
+```bash
+# 1) Instalar (entrada por CLI requiere wheel, no editable)
+uv sync --extra dev
+uv pip install . --no-deps
+
+# 2) Importar un archivo SolarMAN
+uv run solgreen import -f tests/fixtures/flow_small.csv -o out/
+# Genera:
+#   out/flow_small.import.json   (batch + calidad + validez)
+#   out/flow_small.import.md     (reporte humano)
+
+uv run solgreen import -f tests/fixtures/telemetry_small.csv -o out/
+#   out/telemetry_small.import.json
+#   out/telemetry_small.import.md
+```
 
 ## Desarrollo
 
 ```bash
 # requisitos: Python 3.12+, uv 0.11+
 uv sync --extra dev
-uv run pytest          # 18+ tests, cobertura >= 80%
-uv run ruff check .    # lint
-uv run ruff format .   # format
-uv run mypy src        # type-check estricto
+uv run pytest            # 73 tests, cobertura >= 80% (actual 93.41%)
+uv run ruff check .      # lint
+uv run ruff format .     # format
+uv run mypy solgreen     # type-check estricto
 ```
 
-Stack: Python 3.12, Pydantic v2, Polars, openpyxl, typer, PyYAML, pytest, ruff, mypy. Ver `pyproject.toml` y ADR-003.
+Stack: Python 3.12, Pydantic v2, Polars, openpyxl, typer, PyYAML, pytest, ruff, mypy. Ver `pyproject.toml`, `ADR-003` (Python engine) y `ADR-004` (signals dict).
 
 ## Reglas del repositorio
 
