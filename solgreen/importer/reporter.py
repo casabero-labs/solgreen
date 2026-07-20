@@ -17,6 +17,7 @@ from solgreen.contracts import (
     SourceType,
 )
 from solgreen.contracts.validity import ValidityFlags, ValidityReason
+from solgreen.quality._types import QualityResult
 
 PARSER_VERSION = "0.1.0"
 
@@ -47,7 +48,9 @@ def build_import_batch(
 
 
 def summarize_flow(
-    samples: list[PlantFlowSample], expected_columns: tuple[str, ...]
+    samples: list[PlantFlowSample],
+    expected_columns: tuple[str, ...],
+    quality_result: QualityResult | None = None,
 ) -> QualitySummary:
     rows_total = len(samples)
     rows_rejected = sum(1 for s in samples if not s.validity.is_valid)
@@ -57,11 +60,14 @@ def summarize_flow(
         rows_rejected=rows_rejected,
         detected_columns=expected_columns,
         missing_canonical_columns=(),
+        quality_result=quality_result,
     )
 
 
 def summarize_telemetry(
-    samples: list[InverterTelemetrySample], expected_columns: tuple[str, ...]
+    samples: list[InverterTelemetrySample],
+    expected_columns: tuple[str, ...],
+    quality_result: QualityResult | None = None,
 ) -> QualitySummary:
     rows_total = len(samples)
     rows_rejected = sum(1 for s in samples if not s.validity.is_valid)
@@ -71,6 +77,7 @@ def summarize_telemetry(
         rows_rejected=rows_rejected,
         detected_columns=expected_columns,
         missing_canonical_columns=(),
+        quality_result=quality_result,
     )
 
 
@@ -91,13 +98,20 @@ def write_report_json(
     validity: dict[str, int],
     output: IO[str] | Path,
 ) -> None:
-    payload = {
+    payload: dict[str, object] = {
         "batch": batch.model_dump(mode="json"),
         "validity": validity,
         "parser_status": ParserStatus.OK.value
         if batch.quality_summary and batch.quality_summary.rows_rejected == 0
         else ParserStatus.PARTIAL.value,
     }
+    if (
+        batch.quality_summary is not None
+        and batch.quality_summary.quality_result is not None
+    ):
+        payload["quality_analysis"] = batch.quality_summary.quality_result.model_dump(
+            mode="json"
+        )
     text = json.dumps(payload, indent=2, ensure_ascii=False)
     if isinstance(output, Path):
         output.write_text(text, encoding="utf-8")
@@ -131,6 +145,15 @@ def write_report_markdown(
         md_lines.append(f"- Rows total: {qs.rows_total}")
         md_lines.append(f"- Rows parsed: {qs.rows_parsed}")
         md_lines.append(f"- Rows rejected: {qs.rows_rejected}")
+        if qs.quality_result is not None:
+            qr = qs.quality_result
+            md_lines.append(f"- Quality score: {qr.quality_score:.2f}")
+            md_lines.append(f"- Ordered: {qr.ordering.was_ordered}")
+            md_lines.append(f"- Strict (no duplicates): {qr.ordering.was_strict}")
+            if qr.duplicates:
+                md_lines.append(f"- Duplicate groups: {len(qr.duplicates)}")
+            if qr.gaps:
+                md_lines.append(f"- Temporal gaps: {len(qr.gaps)}")
         md_lines.append("")
         md_lines.append("## Validity reasons")
         md_lines.append("")

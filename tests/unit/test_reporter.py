@@ -15,6 +15,7 @@ from solgreen.importer.reporter import (
     write_report_json,
     write_report_markdown,
 )
+from solgreen.quality import analyze_plant_flow, analyze_telemetry
 
 
 def test_build_import_batch_uses_real_sha_and_size() -> None:
@@ -118,3 +119,66 @@ def test_summarize_telemetry_uses_canonical_columns() -> None:
     summary = summarize_telemetry(samples, tuple(ORIGINAL_ES_TO_CANONICAL.keys()))
     assert summary.rows_total == 3
     assert summary.detected_columns == tuple(ORIGINAL_ES_TO_CANONICAL.keys())
+
+
+def test_summarize_flow_with_quality_result() -> None:
+    samples = parse_plant_flow(Path("tests/fixtures/flow_small.csv"))
+    quality_result = analyze_plant_flow(samples, SourceType.SOLARMAN_PLANT_FLOW)
+    summary = summarize_flow(
+        samples, ("a", "b"), quality_result=quality_result
+    )
+    assert summary.quality_result is quality_result
+    assert summary.quality_result is not None
+    assert summary.quality_result.quality_score == 1.0
+
+
+def test_summarize_telemetry_with_quality_result() -> None:
+    samples = parse_inverter_telemetry(Path("tests/fixtures/telemetry_small.csv"))
+    quality_result = analyze_telemetry(samples, SourceType.SOLARMAN_INVERTER_TELEMETRY)
+    summary = summarize_telemetry(
+        samples, ("a", "b"), quality_result=quality_result
+    )
+    assert summary.quality_result is not None
+    assert summary.quality_result.quality_score == 1.0
+
+
+def test_write_report_json_includes_quality_analysis_when_present() -> None:
+    samples = parse_plant_flow(Path("tests/fixtures/flow_small.csv"))
+    quality_result = analyze_plant_flow(samples, SourceType.SOLARMAN_PLANT_FLOW)
+    summary = summarize_flow(samples, ("a", "b"), quality_result=quality_result)
+    batch = build_import_batch(
+        Path("tests/fixtures/flow_small.csv"),
+        SourceType.SOLARMAN_PLANT_FLOW,
+        "solarman_flow_csv",
+        "casabero",
+    )
+    batch = batch.model_copy(
+        update={"status": ImportStatus.PARSED, "quality_summary": summary}
+    )
+    sink = StringIO()
+    write_report_json(batch, _validity_summary(samples), sink)
+    payload = json.loads(sink.getvalue())
+    assert "quality_analysis" in payload
+    assert payload["quality_analysis"]["quality_score"] == 1.0
+    assert payload["quality_analysis"]["total_rows"] == len(samples)
+
+
+def test_write_report_markdown_includes_quality_score(tmp_path: Path) -> None:
+    samples = parse_plant_flow(Path("tests/fixtures/flow_small.csv"))
+    quality_result = analyze_plant_flow(samples, SourceType.SOLARMAN_PLANT_FLOW)
+    summary = summarize_flow(samples, ("a", "b"), quality_result=quality_result)
+    batch = build_import_batch(
+        Path("tests/fixtures/flow_small.csv"),
+        SourceType.SOLARMAN_PLANT_FLOW,
+        "solarman_flow_csv",
+        "casabero",
+    )
+    batch = batch.model_copy(
+        update={"status": ImportStatus.PARSED, "quality_summary": summary}
+    )
+    md_path = tmp_path / "report.md"
+    write_report_markdown(batch, _validity_summary(samples), md_path)
+    text = md_path.read_text(encoding="utf-8")
+    assert "Quality score:" in text
+    assert "Ordered:" in text
+    assert "Strict (no duplicates):" in text
