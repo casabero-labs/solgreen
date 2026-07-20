@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from datetime import timedelta
 from pathlib import Path
@@ -15,6 +16,10 @@ from solgreen.contracts import (
     PlantFlowSample,
     SourceType,
 )
+from solgreen.db import Repository, get_connection
+from solgreen.db.repositories.psycopg2_repo import Psycopg2Repository
+from solgreen.diagnostics.rule import RuleExecution
+from solgreen.diagnostics.rule_catalog import RuleCatalog
 from solgreen.importer.detector import detect_format
 from solgreen.importer.exceptions import UnsupportedFormatError
 from solgreen.importer.parsers.base import PLANT_FLOW_COLUMNS
@@ -33,6 +38,7 @@ from solgreen.importer.reporter import (
 )
 from solgreen.quality import analyze_plant_flow, analyze_telemetry
 from solgreen.timeline import CanonicalSample, join_by_tolerance
+from solgreen.timeline.episode import CanonicalEpisode, build_episodes
 
 app = typer.Typer(add_completion=False, help="Solgreen CLI", no_args_is_help=True)
 
@@ -41,6 +47,13 @@ def _version_callback(value: bool) -> None:
     if value:
         typer.echo(f"solgreen {__version__}")
         raise typer.Exit()
+
+
+def _build_repository(db_url: str | None) -> Repository | None:
+    if db_url is None:
+        return None
+    conn = get_connection(db_url)
+    return Psycopg2Repository(conn)
 
 
 @app.callback()
@@ -61,7 +74,11 @@ class _ParsedFile:
     validity: dict[str, int]
 
 
-def _parse_single_file(file: Path, plant_id: str) -> _ParsedFile:
+def _parse_single_file(
+    file: Path,
+    plant_id: str,
+    repo: Repository | None = None,
+) -> _ParsedFile:
     source_type = detect_format(file)
     if source_type == SourceType.UNKNOWN:
         raise typer.BadParameter(
@@ -79,6 +96,8 @@ def _parse_single_file(file: Path, plant_id: str) -> _ParsedFile:
         batch = batch.model_copy(
             update={"status": ImportStatus.PARSED, "quality_summary": summary}
         )
+        if repo is not None:
+            repo.save_import_batch(batch)
         validity = _validity_summary(flow_samples)
         return _ParsedFile(samples=flow_samples, source_type=source_type, batch=batch, validity=validity)
 
@@ -95,6 +114,8 @@ def _parse_single_file(file: Path, plant_id: str) -> _ParsedFile:
         batch = batch.model_copy(
             update={"status": ImportStatus.PARSED, "quality_summary": summary}
         )
+        if repo is not None:
+            repo.save_import_batch(batch)
         validity = _validity_summary(tel_samples)
         return _ParsedFile(samples=tel_samples, source_type=source_type, batch=batch, validity=validity)
 
@@ -134,11 +155,27 @@ def import_file(
             help="Join tolerance as ISO timedelta (e.g. 'PT2M30S' for 2m30s). Default: 2m30s.",
         ),
     ] = None,
+    db_url: Annotated[
+        str | None,
+        typer.Option(
+            "--db-url",
+            envvar="SOLGREEN_DATABASE_URL",
+            help="PostgreSQL connection URL. If omitted, persistence is skipped.",
+        ),
+    ] = None,
+    no_db: Annotated[
+        bool,
+        typer.Option(
+            "--no-db",
+            help="Explicitly skip database persistence even if SOLGREEN_DATABASE_URL is set.",
+        ),
+    ] = False,
 ) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
+    repo = None if no_db else _build_repository(db_url)
 
     if align_with is not None:
-        _import_with_align(file, align_with, plant_id, output_dir, tolerance)
+        _import_with_align(file, align_with, plant_id, output_dir, tolerance, repo)
         return
 
     source_type = format_override or detect_format(file)
@@ -147,7 +184,7 @@ def import_file(
             f"Could not detect format for {file.name}"
         ) from UnsupportedFormatError(path=file, observed_columns=())
 
-    parsed = _parse_single_file(file, plant_id)
+    parsed = _parse_single_file(file, plant_id, repo)
     json_path = output_dir / f"{file.stem}.import.json"
     md_path = output_dir / f"{file.stem}.import.md"
     write_report_json(parsed.batch, parsed.validity, json_path)
@@ -157,6 +194,8 @@ def import_file(
     total_rows = qs.rows_total if qs else 0
     parsed_rows = qs.rows_parsed if qs else 0
     typer.echo(f"Parsed {parsed_rows}/{total_rows} rows from {file.name}")
+    if repo is not None:
+        typer.echo(f"Persisted batch {parsed.batch.id}")
     typer.echo(f"Report: {json_path}")
     typer.echo(f"Report: {md_path}")
 
@@ -167,6 +206,7 @@ def _import_with_align(
     plant_id: str,
     output_dir: Path,
     tolerance_str: str | None,
+    repo: Repository | None = None,
 ) -> None:
     tol: timedelta
     if tolerance_str is not None:
@@ -174,8 +214,8 @@ def _import_with_align(
     else:
         tol = timedelta(minutes=2, seconds=30)
 
-    parsed1 = _parse_single_file(file1, plant_id)
-    parsed2 = _parse_single_file(file2, plant_id)
+    parsed1 = _parse_single_file(file1, plant_id, repo)
+    parsed2 = _parse_single_file(file2, plant_id, repo)
 
     if parsed1.source_type == parsed2.source_type:
         raise typer.BadParameter(
@@ -192,6 +232,16 @@ def _import_with_align(
     timeline = join_by_tolerance(flow_samples, tel_samples, tolerance=tol)
     timeline_summary = _summarize_timeline(timeline)
 
+    if repo is not None:
+        repo.save_canonical_samples(parsed1.batch.id, timeline)
+        episodes = build_episodes(timeline)
+        catalog = RuleCatalog()
+        for ep in episodes:
+            episode_id = repo.save_canonical_episode(parsed1.batch.id, ep)
+            executions = _evaluate_rules(catalog, ep)
+            for execution in executions:
+                repo.save_rule_execution(episode_id, execution)
+
     json_path = output_dir / f"{file1.stem}__{file2.stem}.timeline.json"
     md_path = output_dir / f"{file1.stem}__{file2.stem}.timeline.md"
     write_timeline_json(timeline, timeline_summary, json_path)
@@ -202,6 +252,10 @@ def _import_with_align(
     typer.echo(f"  flow only: {timeline_summary.flow_only_count}")
     typer.echo(f"  telemetry only: {timeline_summary.telemetry_only_count}")
     typer.echo(f"  coverage: {timeline_summary.coverage_pct:.1f}%")
+    if repo is not None:
+        episodes = build_episodes(timeline)
+        typer.echo(f"  episodes: {len(episodes)}")
+        typer.echo("  persisted to database")
     typer.echo(f"Report: {json_path}")
     typer.echo(f"Report: {md_path}")
 
@@ -223,8 +277,41 @@ def _summarize_timeline(
     )
 
 
+def _evaluate_rules(
+    catalog: RuleCatalog,
+    episode: CanonicalEpisode,
+) -> list[RuleExecution]:
+    executions: list[RuleExecution] = []
+    input_checksum = _episode_checksum(episode)
+
+    for rule in catalog.list_rules():
+        available = {col for col in rule.signals_required if episode.signals.get(col) is not None}
+        fired = len(available) == len(rule.signals_required)
+        evidence: tuple[str, ...] = ()
+        if fired:
+            evidence = (f"All required signals present: {', '.join(rule.signals_required)}",)
+
+        execution = RuleExecution(
+            rule_id=rule.rule_id,
+            rule_version=rule.version,
+            period_start=episode.start,
+            period_end=episode.end,
+            parameters_used=rule.parameters,
+            fired=fired,
+            evidence=evidence,
+            input_checksum=input_checksum,
+        )
+        executions.append(execution)
+
+    return executions
+
+
+def _episode_checksum(episode: CanonicalEpisode) -> str:
+    payload = f"{episode.start.isoformat()}|{episode.end.isoformat()}|{episode.sample_count}"
+    return hashlib.sha256(payload.encode()).hexdigest()
+
+
 def _parse_iso_duration(iso: str) -> float:
-    from datetime import timedelta
     from dateutil.parser import isoparser
 
     td: timedelta = isoparser().parse_timedelta(iso)

@@ -1,5 +1,4 @@
-import pytest
-from datetime import datetime, timedelta, UTC
+from datetime import UTC, datetime, timedelta
 
 from solgreen.contracts.enums import SourceType
 from solgreen.contracts.inverter_telemetry import InverterTelemetrySample

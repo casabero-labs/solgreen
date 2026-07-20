@@ -7,11 +7,12 @@ import psycopg2
 import psycopg2.extras
 
 
-def get_connection() -> Any:
-    dsn = os.environ.get(
-        "SOLGREEN_DATABASE_URL",
-        "postgresql://solgreen:solgreen@localhost:5432/solgreen",
-    )
+def get_connection(dsn: str | None = None) -> Any:
+    if dsn is None:
+        dsn = os.environ.get(
+            "SOLGREEN_DATABASE_URL",
+            "postgresql://solgreen:solgreen@localhost:5432/solgreen",
+        )
     return psycopg2.connect(dsn)
 
 

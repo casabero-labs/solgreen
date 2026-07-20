@@ -1,5 +1,5 @@
+
 import pytest
-from datetime import datetime, timedelta, UTC
 
 from solgreen.quality.score import compute_quality_score
 
