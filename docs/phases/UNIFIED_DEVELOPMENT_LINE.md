@@ -39,9 +39,9 @@ Cada loop dentro del PR unificado debe:
 
 ## 4. Secuencia U0–U7
 
-| Loop | Resultado | Dependencias | Estado inicial |
+| Loop | Resultado | Dependencias | Estado |
 |---|---|---|---|
-| U0 | Fundación unificada y frontend Showcase Ink ejecutable | R0 | ACTIVE |
+| U0 | Fundación unificada y frontend Showcase Ink ejecutable | R0 | TECHNICALLY_VERIFIED_HUMAN_GATE |
 | U1 | Calidad avanzada y semántica correcta | U0, #21 | PLANNED |
 | U2 | Energía y métricas físicas | U1 | PLANNED |
 | U3 | Eventos, reglas y golden cases | U2, #20 | PLANNED |
@@ -81,6 +81,8 @@ Docs: archivos canónicos y privacidad
 Humano: revisión del flujo, alcance y jerarquía
 ```
 
+Evidencia técnica: [`../qa_reports/U0_FRONTEND_FOUNDATION_RESULTS_2026-07-20.md`](../qa_reports/U0_FRONTEND_FOUNDATION_RESULTS_2026-07-20.md).
+
 ### Stop condition
 
 - CI completa en verde;
@@ -91,6 +93,8 @@ Humano: revisión del flujo, alcance y jerarquía
 - README, arquitectura, Loop Registry y Next Steps coinciden;
 - PR #8 cerrado como supersedido;
 - un solo PR de producto abierto.
+
+La condición técnica está cumplida. El cierre definitivo espera revisión humana.
 
 ### Human gate
 
@@ -203,6 +207,6 @@ Durante la línea unificada:
 
 ## 14. Estado actual + próximo paso exacto
 
-**Estado actual:** R0 fusionado; economía E0 absorbida; U0 en desarrollo sobre `develop/solgreen-unified`.
+**Estado actual:** R0 fusionado; economía E0 absorbida; U0 técnicamente verificado y pendiente de revisión humana sobre el PR #27.
 
-**Próximo paso exacto:** ejecutar CI del primer frontend Showcase Ink, corregir únicamente fallos objetivos y cerrar U0 con revisión humana antes de iniciar U1.
+**Próximo paso exacto:** revisar visual y funcionalmente el frontend U0; después cerrar U0 e iniciar U1 dentro de la misma rama y el mismo PR, sin abrir otra línea de desarrollo.
