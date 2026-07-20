@@ -10,6 +10,7 @@
 
 - Rama: `develop/solgreen-unified`
 - Epic: #26
+- Pull request único: #27
 - Política: un solo PR activo contra `main`
 - Roadmap: [`UNIFIED_DEVELOPMENT_LINE.md`](UNIFIED_DEVELOPMENT_LINE.md)
 
@@ -27,7 +28,7 @@ El PR económico #8 fue cerrado como supersedido. Su fundación E0 fue absorbida
 - API health básica;
 - CI, privacidad y estado documental reconciliados.
 
-### Absorbido en la línea unificada
+### Verificado en la línea unificada
 
 - dominio de inteligencia económica;
 - ADR deterministic-first;
@@ -36,7 +37,14 @@ El PR económico #8 fue cerrado como supersedido. Su fundación E0 fue absorbida
 - perfil histórico de ejemplo marcado como no vigente;
 - test plan económico;
 - arquitectura frontend Showcase Ink;
-- primera aplicación React + D3 con datos demo.
+- aplicación React + D3 con datos demo;
+- TypeScript strict;
+- tests de componentes;
+- build Vite;
+- guarda automática Showcase Ink;
+- CI Python, documentación y privacidad.
+
+Evidencia: [`../qa_reports/U0_FRONTEND_FOUNDATION_RESULTS_2026-07-20.md`](../qa_reports/U0_FRONTEND_FOUNDATION_RESULTS_2026-07-20.md).
 
 ### Bloqueado o pendiente
 
@@ -70,8 +78,9 @@ Entregar la fundación integrada y un frontend ejecutable, accesible y honesto s
 - [x] COP vigente bloqueado;
 - [x] importación web falsa evitada;
 - [x] tabla alternativa para gráfica;
-- [ ] CI frontend en verde;
-- [ ] CI Python y documentación en verde sobre el PR;
+- [x] CI frontend en verde;
+- [x] CI Python y documentación en verde sobre el PR;
+- [x] evidencia QA documentada;
 - [ ] revisión humana U0;
 - [ ] cierre documental U0.
 
@@ -194,4 +203,4 @@ Limpiar la semántica y calidad de los datos antes de producir métricas o conec
 
 ## Próximo paso exacto
 
-Crear el único PR draft desde `develop/solgreen-unified`, ejecutar CI completa y corregir únicamente los fallos de U0 hasta obtener verde y revisión humana.
+Revisar visual y funcionalmente el frontend del PR #27. Con aprobación humana, cerrar U0 y continuar U1 dentro de la misma rama y el mismo PR, sin abrir otra línea de desarrollo.
