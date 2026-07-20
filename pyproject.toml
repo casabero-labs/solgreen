@@ -16,6 +16,7 @@ dependencies = [
     "pyyaml>=6.0,<7",
     "python-dateutil>=2.9,<3",
     "typer>=0.15,<1",
+    "psycopg2-binary>=2.9,<3",
 ]
 
 [project.optional-dependencies]
@@ -100,3 +101,6 @@ exclude = ["artifacts", ".venv", "build", "dist"]
 [[tool.mypy.overrides]]
 module = "tests.*"
 disallow_untyped_defs = false
+
+[tool.coverage.run]
+omit = ["solgreen/db/*"]
