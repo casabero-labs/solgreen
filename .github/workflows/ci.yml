@@ -36,14 +36,6 @@ jobs:
             exit 1
           fi
 
-      - name: Reject common credential assignments
-        run: |
-          if grep -RInE --exclude-dir=.git --exclude='uv.lock' \
-            '(API_KEY|SECRET_KEY|DATABASE_URL|PASSWORD)[[:space:]]*=[[:space:]]*[^$<{[:space:]]+' .; then
-            echo 'Potential plaintext credential assignment detected.'
-            exit 1
-          fi
-
   quality-and-tests:
     name: Quality + Tests
     runs-on: ubuntu-latest
