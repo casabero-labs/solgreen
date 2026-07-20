@@ -461,6 +461,7 @@ dev = [
     { name = "pytest" },
     { name = "pytest-cov" },
     { name = "ruff" },
+    { name = "types-openpyxl" },
 ]
 
 [package.metadata]
@@ -475,6 +476,7 @@ requires-dist = [
     { name = "pyyaml", specifier = ">=6.0,<7" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.8,<1" },
     { name = "typer", specifier = ">=0.15,<1" },
+    { name = "types-openpyxl", marker = "extra == 'dev'", specifier = ">=3.1.5.20260518" },
 ]
 provides-extras = ["dev"]
 
@@ -491,6 +493,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/37/78/fda3361b56efc27944f24225f6ecd13d96d6fcfe37bd0eb34e2f4c63f9fc/typer-0.27.0.tar.gz", hash = "sha256:629bd12ea5d13a17148125d9a264f949eb171fb3f120f9b04d85873cab054fa5", size = 203430, upload-time = "2026-07-15T19:21:07.007Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/40/03/26a383c9e58c213199d1aad1c3d353cfc22d4444ec6d2c0bf8ad02523843/typer-0.27.0-py3-none-any.whl", hash = "sha256:6f4b27631e47f077871b7dc30e933ec0131c1390fbe0e387ea5574b5bac9ccf1", size = 122716, upload-time = "2026-07-15T19:21:05.553Z" },
+]
+
+[[package]]
+name = "types-openpyxl"
+version = "3.1.5.20260518"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/f5/d1/a1e23040a758746ad5bb6b8849a011c3c901775618bc7e1fec3a1a8b7142/types_openpyxl-3.1.5.20260518.tar.gz", hash = "sha256:da9cd644e4e80215a3f60a8c2c2c8e980e941a9b581cffa3876285aa791ca5af", size = 101550, upload-time = "2026-05-18T06:03:57.59Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/96/0e/d745ce95fc74e34df802010fd0387e33db468179e6ff42b708280ab268c7/types_openpyxl-3.1.5.20260518-py3-none-any.whl", hash = "sha256:e6ca4b116c8b979ed57f3045edcd3d49c25917d6dae99e90358f41322a19d375", size = 165744, upload-time = "2026-05-18T06:03:56.036Z" },
 ]
 
 [[package]]

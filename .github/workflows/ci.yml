@@ -21,7 +21,10 @@ jobs:
           test -f docs/qa_reports/TEST_PLAN.md
       - name: Reject committed secrets and private exports
         run: |
-          ! find . -type f \( -name '*.csv' -o -name '*.xlsx' -o -name '.env' \) | grep .
+          ! find . -type f \( -name '*.csv' -o -name '*.xlsx' -o -name '.env' \) \
+            -not -path './tests/fixtures/*' \
+            -not -path './.venv/*' \
+            | grep .
 
   python:
     name: Python (uv, ruff, mypy, pytest)
