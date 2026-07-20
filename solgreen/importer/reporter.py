@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from collections import Counter
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import IO
 
@@ -18,6 +18,7 @@ from solgreen.contracts import (
 )
 from solgreen.contracts.validity import ValidityFlags, ValidityReason
 from solgreen.quality._types import QualityResult
+from solgreen.timeline import CanonicalSample
 
 PARSER_VERSION = "0.1.0"
 
@@ -175,3 +176,66 @@ def empty_validity_flags() -> ValidityFlags:
 
 def parse_error_flags() -> ValidityFlags:
     return ValidityFlags().with_reason(ValidityReason.PARSE_ERROR)
+
+
+class _TimelineSummaryForReport:
+    def __init__(
+        self,
+        total_samples: int,
+        merged_count: int,
+        flow_only_count: int,
+        telemetry_only_count: int,
+        coverage_pct: float,
+    ) -> None:
+        self.total_samples = total_samples
+        self.merged_count = merged_count
+        self.flow_only_count = flow_only_count
+        self.telemetry_only_count = telemetry_only_count
+        self.coverage_pct = coverage_pct
+
+
+def write_timeline_json(
+    timeline: list[CanonicalSample],
+    summary: _TimelineSummaryForReport,
+    output: IO[str] | Path,
+) -> None:
+    payload: dict[str, object] = {
+        "timeline": [s.model_dump(mode="json") for s in timeline],
+        "summary": {
+            "total_samples": summary.total_samples,
+            "merged_count": summary.merged_count,
+            "flow_only_count": summary.flow_only_count,
+            "telemetry_only_count": summary.telemetry_only_count,
+            "coverage_pct": summary.coverage_pct,
+        },
+    }
+    text = json.dumps(payload, indent=2, ensure_ascii=False)
+    if isinstance(output, Path):
+        output.write_text(text, encoding="utf-8")
+    else:
+        output.write(text)
+
+
+def write_timeline_markdown(
+    summary: _TimelineSummaryForReport,
+    tolerance: timedelta,
+    output: IO[str] | Path,
+) -> None:
+    md_lines = [
+        "# Solgreen timeline alignment report",
+        "",
+        f"- Tolerance: {tolerance}",
+        "",
+        "## Summary",
+        "",
+        f"- Total canonical samples: {summary.total_samples}",
+        f"- Merged (flow + telemetry): {summary.merged_count}",
+        f"- Flow only: {summary.flow_only_count}",
+        f"- Telemetry only: {summary.telemetry_only_count}",
+        f"- Coverage: {summary.coverage_pct:.1f}%",
+    ]
+    text = "\n".join(md_lines) + "\n"
+    if isinstance(output, Path):
+        output.write_text(text, encoding="utf-8")
+    else:
+        output.write(text)
