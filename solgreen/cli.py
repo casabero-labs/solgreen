@@ -18,6 +18,8 @@ from solgreen.contracts import (
 )
 from solgreen.db import Repository, get_connection
 from solgreen.db.repositories.psycopg2_repo import Psycopg2Repository
+from solgreen.diagnostics.llm_input import LLMEpisodeInput
+from solgreen.diagnostics.llm_provider import LLMProvider, interpret_episode
 from solgreen.diagnostics.rule import RuleExecution
 from solgreen.diagnostics.rule_catalog import RuleCatalog
 from solgreen.importer.detector import detect_format
@@ -54,6 +56,23 @@ def _build_repository(db_url: str | None) -> Repository | None:
         return None
     conn = get_connection(db_url)
     return Psycopg2Repository(conn)
+
+
+def _build_llm_provider(
+    provider_name: str | None,
+    model: str | None,
+    api_key: str | None,
+) -> LLMProvider | None:
+    if provider_name is None or provider_name == "none":
+        return None
+    if api_key is None:
+        raise typer.BadParameter(
+            f"--llm-api-key required for provider '{provider_name}'"
+        )
+    if provider_name == "deepseek":
+        from solgreen.diagnostics.llm_provider import DeepSeekProvider
+        return DeepSeekProvider(api_key=api_key, model=model)
+    raise typer.BadParameter(f"Unknown LLM provider: {provider_name}")
 
 
 @app.callback()
@@ -170,12 +189,37 @@ def import_file(
             help="Explicitly skip database persistence even if SOLGREEN_DATABASE_URL is set.",
         ),
     ] = False,
+    llm_provider_name: Annotated[
+        str | None,
+        typer.Option(
+            "--llm-provider",
+            envvar="SOLGREEN_LLM_PROVIDER",
+            help="LLM provider name (e.g. 'deepseek'). If omitted or 'none', LLM is skipped.",
+        ),
+    ] = None,
+    llm_model: Annotated[
+        str | None,
+        typer.Option(
+            "--llm-model",
+            envvar="SOLGREEN_LLM_MODEL",
+            help="LLM model override (provider-specific).",
+        ),
+    ] = None,
+    llm_api_key: Annotated[
+        str | None,
+        typer.Option(
+            "--llm-api-key",
+            envvar="SOLGREEN_LLM_API_KEY",
+            help="LLM API key. Required when --llm-provider is set.",
+        ),
+    ] = None,
 ) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     repo = None if no_db else _build_repository(db_url)
+    provider = _build_llm_provider(llm_provider_name, llm_model, llm_api_key)
 
     if align_with is not None:
-        _import_with_align(file, align_with, plant_id, output_dir, tolerance, repo)
+        _import_with_align(file, align_with, plant_id, output_dir, tolerance, repo, provider)
         return
 
     source_type = format_override or detect_format(file)
@@ -207,6 +251,7 @@ def _import_with_align(
     output_dir: Path,
     tolerance_str: str | None,
     repo: Repository | None = None,
+    provider: LLMProvider | None = None,
 ) -> None:
     tol: timedelta
     if tolerance_str is not None:
@@ -232,15 +277,18 @@ def _import_with_align(
     timeline = join_by_tolerance(flow_samples, tel_samples, tolerance=tol)
     timeline_summary = _summarize_timeline(timeline)
 
+    episodes_built = build_episodes(timeline)
+
     if repo is not None:
         repo.save_canonical_samples(parsed1.batch.id, timeline)
-        episodes = build_episodes(timeline)
         catalog = RuleCatalog()
-        for ep in episodes:
+        for ep in episodes_built:
             episode_id = repo.save_canonical_episode(parsed1.batch.id, ep)
             executions = _evaluate_rules(catalog, ep)
             for execution in executions:
                 repo.save_rule_execution(episode_id, execution)
+            if provider is not None:
+                _run_llm_interpretation(provider, plant_id, ep, executions, episode_id, repo)
 
     json_path = output_dir / f"{file1.stem}__{file2.stem}.timeline.json"
     md_path = output_dir / f"{file1.stem}__{file2.stem}.timeline.md"
@@ -252,10 +300,11 @@ def _import_with_align(
     typer.echo(f"  flow only: {timeline_summary.flow_only_count}")
     typer.echo(f"  telemetry only: {timeline_summary.telemetry_only_count}")
     typer.echo(f"  coverage: {timeline_summary.coverage_pct:.1f}%")
+    typer.echo(f"  episodes: {len(episodes_built)}")
     if repo is not None:
-        episodes = build_episodes(timeline)
-        typer.echo(f"  episodes: {len(episodes)}")
         typer.echo("  persisted to database")
+    if provider is not None:
+        typer.echo(f"  LLM provider: {provider.provider_name}")
     typer.echo(f"Report: {json_path}")
     typer.echo(f"Report: {md_path}")
 
@@ -309,6 +358,29 @@ def _evaluate_rules(
 def _episode_checksum(episode: CanonicalEpisode) -> str:
     payload = f"{episode.start.isoformat()}|{episode.end.isoformat()}|{episode.sample_count}"
     return hashlib.sha256(payload.encode()).hexdigest()
+
+
+def _run_llm_interpretation(
+    provider: LLMProvider,
+    plant_id: str,
+    episode: CanonicalEpisode,
+    executions: list[RuleExecution],
+    episode_id: int,
+    repo: Repository,
+) -> None:
+    fired_rules = tuple(e for e in executions if e.fired)
+    input_data = LLMEpisodeInput(
+        plant_id=plant_id,
+        episode=episode,
+        fired_rules=fired_rules,
+        data_quality_summary=f"Episode {episode.episode_type}, {episode.sample_count} samples.",
+    )
+    try:
+        interpretation = interpret_episode(provider, input_data)
+        repo.save_llm_interpretation(episode_id, interpretation)
+        typer.echo(f"    LLM: {interpretation.summary[:80]}...")
+    except Exception as exc:
+        typer.echo(f"    LLM error: {exc}")
 
 
 def _parse_iso_duration(iso: str) -> float:
