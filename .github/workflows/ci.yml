@@ -5,12 +5,45 @@ on:
     branches: ['**']
   pull_request:
     branches: [main]
-    paths-ignore:
-      - '**.md'
-      - '.gitignore'
-      - 'docs/**'
 
 jobs:
+  documentation:
+    name: Documentation + Privacy
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate required project documents
+        run: |
+          test -f README.md
+          test -f AGENTS.md
+          test -f CHANGELOG.md
+          test -f docs/domain/FOUNDATIONS.md
+          test -f docs/domain/DATA_CONTRACTS.md
+          test -f docs/phases/LOOP_REGISTRY.md
+          test -f docs/phases/NEXT_STEPS.md
+          test -f docs/qa_reports/TEST_PLAN.md
+
+      - name: Reject private exports and local secrets
+        run: |
+          if find . -type f \( -name '*.csv' -o -name '*.xlsx' -o -name '.env' \) \
+            -not -path './tests/fixtures/*' \
+            -not -path './.venv/*' \
+            -not -path './.git/*' \
+            | grep .; then
+            echo 'Private export or local secret file committed outside approved fixtures.'
+            exit 1
+          fi
+
+      - name: Reject common credential assignments
+        run: |
+          if grep -RInE --exclude-dir=.git --exclude='uv.lock' \
+            '(API_KEY|SECRET_KEY|DATABASE_URL|PASSWORD)[[:space:]]*=[[:space:]]*[^$<{[:space:]]+' .; then
+            echo 'Potential plaintext credential assignment detected.'
+            exit 1
+          fi
+
   quality-and-tests:
     name: Quality + Tests
     runs-on: ubuntu-latest
@@ -21,25 +54,25 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: '3.12'
 
       - name: Install uv
         uses: astral-sh/setup-uv@v5
         with:
-          version: "0.11.26"
+          version: '0.11.26'
           enable-cache: true
-          cache-dependency-glob: "*.lock"
+          cache-dependency-glob: '*.lock'
 
       - name: Sync dependencies
         run: uv sync --extra dev --frozen
 
-      - name: Lint (ruff)
+      - name: Lint
         run: uv run ruff check .
 
-      - name: Format check (ruff)
+      - name: Format check
         run: uv run ruff format --check .
 
-      - name: Type check (mypy strict)
+      - name: Type check
         run: uv run mypy solgreen
 
       - name: Tests with coverage
