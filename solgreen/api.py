@@ -11,7 +11,7 @@ from fastapi.responses import JSONResponse
 app = FastAPI(title="Solgreen", version="0.1.0")
 
 
-@app.get("/health")
+@app.get("/health", response_model=None)
 async def health() -> dict[str, Any] | JSONResponse:
     """Health check endpoint for Coolify."""
     db_url = os.environ.get("SOLGREEN_DATABASE_URL")
