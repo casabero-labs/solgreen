@@ -7,6 +7,7 @@ on:
 
 jobs:
   documentation:
+    name: Validate docs and reject private data
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -21,3 +22,27 @@ jobs:
       - name: Reject committed secrets and private exports
         run: |
           ! find . -type f \( -name '*.csv' -o -name '*.xlsx' -o -name '.env' \) | grep .
+
+  python:
+    name: Python (uv, ruff, mypy, pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.11.26"
+          enable-cache: true
+      - name: Sync dependencies
+        run: uv sync --extra dev --frozen
+      - name: Lint (ruff)
+        run: uv run ruff check .
+      - name: Format check (ruff)
+        run: uv run ruff format --check .
+      - name: Type check (mypy strict)
+        run: uv run mypy src
+      - name: Tests with coverage
+        run: uv run pytest

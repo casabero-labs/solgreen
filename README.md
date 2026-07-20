@@ -64,7 +64,20 @@ Los datasets reales no se versionan en Git. Se usarán fixtures sintéticos y ha
 
 ## Estado
 
-**Fase documental inicial.** No existe todavía lógica productiva. La siguiente entrega es el importador reproducible de ambos formatos SolarMAN, sin IA.
+**Loop L1 — Importación reproducible** en curso (PR por iteración). L0 foundation freeze cerrado.
+
+## Desarrollo
+
+```bash
+# requisitos: Python 3.12+, uv 0.11+
+uv sync --extra dev
+uv run pytest          # 18+ tests, cobertura >= 80%
+uv run ruff check .    # lint
+uv run ruff format .   # format
+uv run mypy src        # type-check estricto
+```
+
+Stack: Python 3.12, Pydantic v2, Polars, openpyxl, typer, PyYAML, pytest, ruff, mypy. Ver `pyproject.toml` y ADR-003.
 
 ## Reglas del repositorio
 
