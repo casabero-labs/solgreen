@@ -1,5 +1,69 @@
 # Plan de pruebas
 
+## U2 — Energy semantics and metrics
+
+### U2.0 — Discovery (documental)
+
+- ENERGY_SEMANTICS.md exists and is complete.
+- ADR-008 exists and status is Proposed.
+- U2_ENERGY_DISCOVERY QA report exists.
+- No assertions of confirmed sign without evidence.
+- No energy (Wh/kWh) calculations.
+- No code changes to production modules.
+- Grid import/export terms only in conceptual context.
+- ADR not marked Accepted while human gates pending.
+
+### U2.1 — PowerSignProfile and directional normalization
+
+- PowerSignProfile contract with all mandatory fields.
+- normalize_sign pure function: same input + same profile = same output.
+- status=unknown forbids normalization (raises or returns unavailable).
+- status=provisional allows normalization with warning.
+- status=confirmed allows full normalization.
+- Directional fields never negative (invariant).
+- Grid import/export never simultaneously positive for same net sample.
+- Battery charge/discharge never simultaneously positive for same net sample.
+- Unknown sign produces None in all directional fields.
+- Zero measured preserved in appropriate directional field.
+- profile_version and lineage recorded on normalization.
+
+### U2.2 — Temporal integration
+
+- integrate_power pure function with configurable method.
+- All integration methods produce correct energy from synthetic fixtures.
+- Zero-duration intervals excluded.
+- NaN/Inf/None values excluded from integration.
+- First/last point handling documented and tested.
+- Gaps produce missing state, not assumed energy.
+- Coverage computed as observed_duration / expected_duration.
+- EnergyInterval fields validated per sample.
+- EnergySummary aggregates correctly over window.
+
+### U2.3–U2.5 — Directional metrics
+
+- grid_import_wh computed from grid_import_w integration.
+- grid_export_wh computed from grid_export_w integration.
+- battery_charge_wh from battery_charge_w integration.
+- battery_discharge_wh from battery_discharge_w integration.
+- pv_generation_wh from pv_generation_w integration.
+- load_consumption_wh from load_consumption_w integration.
+- Hourly and daily aggregations correct.
+
+### U2.6 — Coverage and profiles
+
+- coverage_fraction < 1.0 handled correctly.
+- Missing energy is unknown, not zero.
+- Aggregation windows respect timezone.
+- Hourly profile contains mean, P50, P90, P95, max.
+- Day classification (weekday/weekend/holiday) applied correctly.
+
+### U2.7 — Reconciliation
+
+- Cumulative counter deltas match integrated energy within tolerance.
+- Counter reset detection works.
+- Reconciliation status: within_tolerance, review, unreconciled.
+- Candidate explanations when reconciliation fails.
+
 ## U1 — Calidad, semántica y safety gates
 
 ### Cero y estado (U1.1)

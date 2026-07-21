@@ -43,7 +43,7 @@ Cada loop dentro del PR unificado debe:
 |---|---|---|---|---|
 | U0 | Fundación unificada y frontend Showcase Ink ejecutable | R0 | TECHNICALLY_VERIFIED_HUMAN_GATE |
 | U1 | Calidad, semántica y safety gates | U0, #21 | ENGINEERING_CLOSED |
-| U2 | Energía y métricas físicas | U1 | NEXT_PLANNED |
+| U2 | Energía y métricas físicas | U1 | DISCOVERY_COMPLETE_HUMAN_GATE_PENDING |
 | U3 | Eventos, reglas y golden cases | U2, #20 | PLANNED |
 | U4 | Frontend conectado y flujos human-first | U3 | PLANNED |
 | U5 | Inteligencia económica Afinia | U2, U4 | FOUNDATION_ABSORBED |
@@ -237,18 +237,46 @@ La condición técnica está cumplida.
 Revertir commits U1 en `develop/solgreen-unified`. Main conserva R0 + U0.
 
 ### Próximo loop exacto
-U2: energía, métricas físicas y perfiles de signo.
+U2.1 — PowerSignProfile contract y normalización direccional, bloqueado hasta confirmación de signos mediante human gates.
 
 ## 7. U2 — Energía y métricas
 
-- integración temporal W→Wh/kWh;
-- tratamiento de huecos;
-- importación y exportación canónicas;
-- carga y descarga de batería;
-- balance y residual;
-- cobertura y confianza;
-- perfiles horarios locales;
-- no mezclar potencia con energía.
+### U2.0 — Energy semantics discovery
+
+**Estado:** DISCOVERY_COMPLETE_HUMAN_GATE_PENDING
+
+- Inventario completo de 23+ señales energéticas (potencia, energía, estado).
+- Matriz AC/DC: PV DC separado de consumo AC; potencia aparente ≠ potencia activa.
+- Matriz de signos: confirmed 0, provisional 6, unknown 2.
+- Jerarquía de autoridad: fiscal (medidor Afinia) vs operacional (SolarMAN, inversor).
+- Diseño conceptual: PowerSignProfile versionado, normalización direccional.
+- Contratos conceptuales: EnergyInterval, EnergySummary.
+- Política de gaps: no interpolar, estados explícitos, cobertura como fracción.
+- ADR-008: Proposed (human gates pendientes).
+- Plan U2.1–U2.7 definido.
+
+**Human gates pendientes:**
+- Confirmación de signo de red (ventana nocturna con PV cero y consumo conocido).
+- Confirmación de signo de batería (carga solar, descarga nocturna).
+- Semántica temporal de muestras (instantánea vs promedio vs hold).
+- Puntos físicos de medición (CT, BMS, cableado).
+
+**Artefactos:**
+- [`docs/domain/ENERGY_SEMANTICS.md`](../domain/ENERGY_SEMANTICS.md)
+- [`docs/decisions/ADR-008-energy-integration-and-sign-profiles.md`](../decisions/ADR-008-energy-integration-and-sign-profiles.md)
+- [`docs/qa_reports/U2_ENERGY_DISCOVERY_2026-07-21.md`](../qa_reports/U2_ENERGY_DISCOVERY_2026-07-21.md)
+
+### U2.1–U2.7 — Planned implementation
+
+| Sub-phase | Goal | Depends on |
+|---|---|---|
+| U2.1 | PowerSignProfile + normalización direccional | U2.0 human gates |
+| U2.2 | Integración temporal W→Wh genérica | U2.1 |
+| U2.3 | Métricas de red (import/export, horarios) | U2.2 |
+| U2.4 | Métricas de batería (charge/discharge) | U2.2 |
+| U2.5 | Métricas de producción y consumo | U2.2 |
+| U2.6 | Cobertura, agregaciones, perfiles horarios | U2.3–U2.5 |
+| U2.7 | Conciliación con contadores acumulados, QA | U2.3–U2.6 |
 
 ## 8. U3 — Eventos y reglas
 

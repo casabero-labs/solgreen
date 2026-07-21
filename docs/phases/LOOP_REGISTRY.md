@@ -79,7 +79,7 @@ npm run build
 | R0 | Reconciliar baseline y safety gates | CI y auditoría | estado documental coincide con código | CLOSED |
 | U0 | Integrar economía y frontend Showcase Ink | TS, Vitest, build, docs | primera vertical ejecutable y honesta | TECHNICALLY_VERIFIED_HUMAN_GATE |
 | U1 | Calidad avanzada y semántica | fixtures y tests | cero, status, plausibilidad, consistencia y safety gates | ENGINEERING_CLOSED |
-| U2 | Energía y métricas físicas | fórmulas y golden manuales | W→kWh y balance reproducibles | NEXT_PLANNED |
+| U2 | Energía y métricas físicas | fórmulas y golden manuales | W→kWh y balance reproducibles | DISCOVERY_COMPLETE_HUMAN_GATE_PENDING |
 | U3 | Eventos, reglas y evidencia | golden 17/19 | eventos científicos y reglas reales | PLANNED |
 | U4 | Frontend conectado | Playwright Human-First | carga, timeline y episodios utilizables | PLANNED |
 | U5 | Afinia, cargas y escenarios | golden billing | factura y horarios reproducibles | FOUNDATION_ABSORBED |
@@ -94,6 +94,74 @@ npm run build
 - #24: parser ISO de duración;
 - #25: baseline global de formato;
 - #26: epic de línea unificada.
+
+## U2.0 — Energy semantics, sign profiles and integration contract discovery
+
+### Goal
+
+Determinar y documentar la semántica energética completa antes de implementar
+cualquier cálculo W→Wh.
+
+### Context
+
+- U1 ENGINEERING_CLOSED con 442 tests, 90.78% cobertura.
+- CanonicalSample contiene 7 campos de potencia en W sin signos normalizados.
+- FOUNDATIONS.md declara convenciones canónicas direccionales pero sin implementación.
+- No existe perfil de signos versionado.
+- No se conoce la semántica temporal de las muestras (instantánea vs promedio).
+
+### Actions ejecutadas
+
+1. Inventario completo de señales energéticas (potencia, energía) con 23+ señales.
+2. Matriz AC/DC por señal.
+3. Matriz de convención de signos con estados confirmed/provisional/unknown.
+4. Jerarquía de autoridad: fiscal (medidor Afinia) vs operacional (SolarMAN/inversor).
+5. Diseño conceptual de PowerSignProfile (perfil de signos versionado).
+6. Diseño conceptual de normalización direccional (grid_import_w, grid_export_w, battery_charge_w, battery_discharge_w).
+7. Diseño conceptual de integración temporal W→Wh.
+8. Política de gaps: no interpolar, estados explícitos, cobertura como fracción.
+9. Contratos conceptuales: EnergyInterval, EnergySummary.
+10. Precondiciones para balances físicos.
+11. Procedimiento de human gates para confirmación de signos.
+12. Plan de implementación U2.1–U2.7.
+
+### Feedback
+
+- Ruff + mypy + pytest + cobertura ≥ 80%.
+- Frontend npm ci + typecheck + test + build.
+- Verificación de afirmaciones inseguras con `rg`.
+- Documentación canónica verificada.
+
+### Stop condition cumplida
+
+- Inventario completo de señales energéticas documentado.
+- AC/DC y puntos físicos documentados.
+- Autoridad fiscal y operativa separadas.
+- Signos conocidos y desconocidos explícitos.
+- Ningún signo normalizado sin perfil.
+- Ningún cálculo de energía realizado.
+- Política de gaps y cobertura definida.
+- Contrato de integración temporal propuesto.
+- ADR-008 permanece Proposed.
+- Plan U2.1–U2.7 definido.
+- CI verde, PR draft.
+- Sin cambios productivos.
+
+### Human gates pendientes
+
+- Signo de red: ventana nocturna con consumo conocido y PV cero.
+- Signo de batería: ventana de carga solar y descarga nocturna.
+- Semántica temporal de las muestras.
+- Puntos físicos de medición (CT, BMS, cableado).
+
+### Rollback
+
+Revertir commit documental. Sin cambios productivos.
+
+### Próximo loop exacto
+
+U2.1 — PowerSignProfile contract y normalización direccional, bloqueado
+hasta confirmación de signos mediante human gates.
 
 ## Loop cerrado
 

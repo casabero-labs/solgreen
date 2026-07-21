@@ -4,6 +4,55 @@ Todas las versiones siguen [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### U2.0 — Energy semantics, sign profiles and integration contract discovery
+
+#### Added
+
+- `docs/domain/ENERGY_SEMANTICS.md` — Complete signal inventory (23+
+  signals), AC/DC matrix, authority hierarchy, sign conventions,
+  conceptual contracts for PowerSignProfile, directional normalization,
+  and temporal integration.
+- `docs/decisions/ADR-008-energy-integration-and-sign-profiles.md` —
+  Architectural decision establishing versioned sign profiles,
+  directional magnitude contracts, temporal integration dependencies,
+  gap and coverage policies, and human gates. Status: Proposed.
+- `docs/qa_reports/U2_ENERGY_DISCOVERY_2026-07-21.md` — Discovery QA
+  report documenting signal inventory, authority matrix, sign matrix,
+  uncertainties, risks, proposed contracts, gap policy, coverage policy,
+  and U2.1–U2.7 implementation plan.
+
+#### Discovered
+
+- 7 power signals in CanonicalSample: 6 provisional, 1 unknown sign convention.
+- 16+ additional power/energy signals available but not yet in CanonicalSample.
+- PV power is DC (`telemetry_pv_power_w` from MPPT) while flow production
+  is AC — cannot be directly compared without inverter efficiency.
+- `flow_battery_w` documented as negative=charge, positive=discharge but
+  PlantFlowSample claims parser normalizes while parser does not.
+- `telemetry_battery_power_w` sign convention is completely unknown.
+- No sign has been confirmed with human gate evidence.
+- No Wh or kWh has been calculated.
+
+#### Changed
+
+- `docs/phases/LOOP_REGISTRY.md` — U2 status from NEXT_PLANNED to
+  DISCOVERY_COMPLETE_HUMAN_GATE_PENDING; added U2.0 entry.
+- `docs/phases/NEXT_STEPS.md` — Updated next step to U2.1 with human gate
+  dependencies.
+- `docs/phases/UNIFIED_DEVELOPMENT_LINE.md` — U2 status updated; U2.0
+  content added with artifacts and U2.1–U2.7 plan.
+- `docs/qa_reports/TEST_PLAN.md` — Added U2 section with test plans
+  for U2.0–U2.7.
+
+#### Known limitations
+
+- No PowerSignProfile implementation or sign normalization (U2.1).
+- No temporal integration W→Wh (U2.2).
+- No directional energy metrics (U2.3–U2.5).
+- No physical balance equations.
+- All grid and battery signs remain provisional or unknown.
+- Human gates for sign confirmation not yet executed.
+
 ### U1 — Calidad avanzada, semántica y safety gates
 
 #### Added

@@ -78,4 +78,17 @@ El issue #20 sigue abierto para evaluadores U3.
 
 ## Próximo paso exacto
 
-**U2.0** — Energy semantics, sign profiles and integration contract discovery.
+**U2.0** — DISCOVERY_COMPLETE_HUMAN_GATE_PENDING.
+
+La semántica energética, la jerarquía de autoridad, los perfiles de signo
+y los contratos de integración están documentados. La implementación de
+U2.1 (normalización direccional) está bloqueada hasta que los human gates
+confirmen signos de red y batería con evidencia privada.
+
+Evidencia U2.0:
+- [`../docs/domain/ENERGY_SEMANTICS.md`](../docs/domain/ENERGY_SEMANTICS.md)
+- [`../docs/decisions/ADR-008-energy-integration-and-sign-profiles.md`](../docs/decisions/ADR-008-energy-integration-and-sign-profiles.md)
+- [`../docs/qa_reports/U2_ENERGY_DISCOVERY_2026-07-21.md`](../docs/qa_reports/U2_ENERGY_DISCOVERY_2026-07-21.md)
+
+Próximo loop exacto: **U2.1** — PowerSignProfile + normalización direccional.
+Depende de human gates: confirmación de signo de red y signo de batería.
