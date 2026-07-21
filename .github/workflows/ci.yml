@@ -32,6 +32,7 @@ jobs:
           test -f docs/qa_reports/FRONTEND_FOUNDATION_TEST_PLAN.md
           test -f docs/qa_reports/ECONOMIC_INTELLIGENCE_TEST_PLAN.md
           test -f apps/web/package.json
+          test -f apps/web/package-lock.json
 
       - name: Reject private exports and local secrets
         run: |
@@ -124,7 +125,7 @@ jobs:
           node-version: '20'
 
       - name: Install frontend dependencies
-        run: npm install --no-audit --no-fund
+        run: npm ci --no-audit --no-fund
 
       - name: Validate Showcase Ink constraints
         run: |
