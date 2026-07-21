@@ -115,6 +115,22 @@ class TestRejectedDurations:
         with pytest.raises(ValueError, match="Invalid"):
             parse_iso_duration("PD")
 
+    def test_pt0_123456s_max_precision(self) -> None:
+        result = parse_iso_duration("PT0.123456S")
+        assert result == timedelta(microseconds=123456)
+
+    def test_pt0_1234567s_exceeds_max_precision(self) -> None:
+        with pytest.raises(ValueError, match="exceeds maximum"):
+            parse_iso_duration("PT0.1234567S")
+
+    def test_precision_message_mentions_max_digits(self) -> None:
+        with pytest.raises(ValueError, match="6 decimal"):
+            parse_iso_duration("PT0.1234567S")
+
+    def test_no_silent_truncation(self) -> None:
+        result = parse_iso_duration("PT0.123456S")
+        assert result.microseconds == 123456
+
 
 class TestDeterminismAndPurity:
     def test_repeated_call_identical(self) -> None:

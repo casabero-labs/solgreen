@@ -42,6 +42,7 @@ from solgreen.quality import analyze_plant_flow, analyze_telemetry
 from solgreen.timeline import CanonicalSample, join_by_tolerance
 from solgreen.timeline.duration import parse_iso_duration
 from solgreen.timeline.episode import CanonicalEpisode, build_episodes
+from solgreen.timeline.join import DEFAULT_TOLERANCE
 
 app = typer.Typer(add_completion=False, help="Solgreen CLI", no_args_is_help=True)
 
@@ -261,6 +262,15 @@ def import_file(
         ),
     ] = None,
 ) -> None:
+    if align_with is not None:
+        if tolerance is None:
+            _tol = DEFAULT_TOLERANCE
+        else:
+            try:
+                _tol = parse_iso_duration(tolerance)
+            except ValueError as exc:
+                raise typer.BadParameter(f"Invalid --tolerance value {tolerance!r}: {exc}") from exc
+
     output_dir.mkdir(parents=True, exist_ok=True)
     repo = None if no_db else _build_repository(db_url)
     provider = _build_llm_provider(
@@ -273,7 +283,7 @@ def import_file(
     )
 
     if align_with is not None:
-        _import_with_align(file, align_with, plant_id, output_dir, tolerance, repo, provider)
+        _import_with_align(file, align_with, plant_id, output_dir, _tol, repo, provider)
         return
 
     source_type = format_override or detect_format(file)
@@ -303,19 +313,10 @@ def _import_with_align(
     file2: Path,
     plant_id: str,
     output_dir: Path,
-    tolerance_str: str | None,
+    tol: timedelta,
     repo: Repository | None = None,
     provider: LLMProvider | None = None,
 ) -> None:
-    tol: timedelta
-    if tolerance_str is not None:
-        try:
-            tol = parse_iso_duration(tolerance_str)
-        except ValueError as exc:
-            raise typer.BadParameter(f"Invalid --tolerance value {tolerance_str!r}: {exc}") from exc
-    else:
-        tol = timedelta(minutes=2, seconds=30)
-
     parsed1 = _parse_single_file(file1, plant_id, repo)
     parsed2 = _parse_single_file(file2, plant_id, repo)
 

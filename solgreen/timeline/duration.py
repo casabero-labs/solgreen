@@ -62,7 +62,14 @@ def parse_iso_duration(value: str) -> timedelta:
     seconds = int(match.group(4) or 0)
     microseconds_str = match.group(5) or "0"
 
-    microseconds_str = microseconds_str.ljust(6, "0")[:6]
+    if len(microseconds_str) > 6:
+        raise ValueError(
+            f"Fractional seconds precision exceeds maximum of 6 decimal "
+            f"digits (microseconds): {value!r}. "
+            f"Got {len(microseconds_str)} digits — truncation is not supported."
+        )
+
+    microseconds_str = microseconds_str.ljust(6, "0")
     microseconds = int(microseconds_str)
 
     total_seconds = (
