@@ -279,6 +279,7 @@ class TestNoAlignWith:
                 str(tmp_path),
                 "--plant-id",
                 "casabero",
+                "--no-db",
             ],
         )
         assert result.exit_code == 0, result.output
