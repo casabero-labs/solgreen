@@ -4,7 +4,77 @@ Todas las versiones siguen [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-### U0 — Línea unificada y frontend Showcase Ink
+### U1 — Calidad avanzada, semántica y safety gates
+
+#### Added
+
+- `get_text(canonical_name)` en `InverterTelemetrySample` para preservar
+  señales textuales independientemente del tipo numérico.
+- `QualityDimensions` (completeness, temporal_coverage,
+  duplicate_integrity, plausibility_score, consistency_score).
+- `QualityResult.dimensions` manteniendo `quality_score` como campo
+  serializado.
+- `MeasurementPlausibilityProfile`, `MeasurementRange`, `PlausibilityFinding`
+  y `PlausibilityResult` para plausibilidad basada en perfil.
+- `ConsistencyPair`, `MeasurementConsistencyProfile` y `ConsistencyResult`
+  para consistencia entre fuentes basada en perfil.
+- Parser `parse_iso_duration(value: str) -> timedelta` con soporte ISO 8601
+  (D/H/M/S + fraccionales hasta 6 dígitos).
+- `RuleImplementationStatus`, `RuleEvaluationOutcome`,
+  `RuleEvaluatorRegistry`, `eligible_fired_rules` y `evaluate_rule_catalog`
+  para evaluación defensiva de reglas.
+- `apply_consistency_to_dimensions(dimensions, canonical_samples, profile)`
+  como función separada del análisis de una sola fuente.
+- `docs/qa_reports/U1_DATA_QUALITY_RESULTS_2026-07-21.md`.
+
+#### Changed
+
+- `telemetry_grid_power_w` ahora se alimenta de
+  `total_active_power_of_the_grid_w` (no `potencia_total_ca_w`).
+- `telemetry_inverter_state` usa `get_text` en ambas rutas
+  (merged y telemetry-only).
+- `compute_quality_score` (single-float) reemplazado por
+  `compute_temporal_dimensions` y `aggregate_quality_score` con
+  pesos nombrados (`DUPLICATE_INTEGRITY_WEIGHT=0.60`,
+  `TEMPORAL_COVERAGE_WEIGHT=0.40`).
+- Calidad temporal: huecos ponderados por duración, no por cantidad.
+- CLI `import`: tolerancia se valida antes de `mkdir`, `_build_repository`,
+  `_build_llm_provider` y `_parse_single_file`.
+- Formato normalizado en todo el repositorio (`ruff format .`).
+- CI usa `ruff format --check --diff .` (global, no incremental).
+- CI usa `npm ci` en lugar de `npm install`.
+- Documentación canónica reconciliada con el estado ENGINEERING_CLOSED de U1.
+
+#### Fixed
+
+- `_pv_power`: `pv1 or pv2` reemplazado por ramas `is not None` explícitas.
+- `compute_quality_score(total_rows=0)` ya no devuelve 1.0.
+- `_parse_iso_duration` reemplazado por parser propio y testeado;
+  mypy override eliminado.
+- `_evaluate_rules` eliminado; ya no dispara reglas por presencia de
+  señales. Cinco seed rules producen `not_evaluable`.
+- `PlausibilityResult` invariante: `evaluated_count == passed_count + failed_count`.
+- `ConsistencyResult` invariante: mismo patrón.
+
+#### Safety
+
+- Seed rules declaradas `implementation_status=planned`.
+- `evaluate_rule_catalog` con registro vacío de producción → 0 RuleExecution
+  persistidos para seed rules.
+- `eligible_fired_rules` filtra fired=True con evidence no vacía.
+- `_run_llm_interpretation` salta sin evidencia elegible:
+  sin prompt, sin `provider.complete`, sin persistencia.
+- CLI reporta: `LLM skipped: no validated fired-rule evidence`.
+
+#### Known limitations
+
+- Sin motor de energía W→Wh/kWh (U2).
+- Sin evaluadores científicos de reglas (U3).
+- Sin detección de eventos con ventanas antes/durante/después (U3).
+- Sin perfiles reales de plausibilidad o consistencia para Casabero.
+- Sin confirmación de signos de red y batería.
+- Frontend demo, no conectado.
+- #20 y #21 permanecen abiertos para U3.
 
 - R0 fusionado como baseline estable.
 - Desarrollo consolidado en `develop/solgreen-unified` con un solo PR activo.

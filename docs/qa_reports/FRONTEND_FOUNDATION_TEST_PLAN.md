@@ -157,7 +157,7 @@ Comandos esperados:
 
 ```bash
 cd apps/web
-npm install --no-audit --no-fund
+npm ci --no-audit --no-fund
 npm run typecheck
 npm run test
 npm run build

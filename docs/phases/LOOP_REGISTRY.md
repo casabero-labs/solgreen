@@ -42,15 +42,16 @@ main → develop/solgreen-unified → un único PR activo
 ```bash
 uv sync --extra dev --frozen
 uv run ruff check .
+uv run ruff format --check .
 uv run mypy solgreen
-uv run pytest
+uv run pytest --cov=solgreen --cov-fail-under=80
 ```
 
 ### Frontend
 
 ```bash
 cd apps/web
-npm install --no-audit --no-fund
+npm ci --no-audit --no-fund
 npm run typecheck
 npm run test
 npm run build
@@ -74,11 +75,11 @@ npm run build
 ## Estado oficial unificado
 
 | Loop | Objetivo | Feedback principal | Stop condition | Estado |
-|---|---|---|---|---|
+|---|---|---|---|---|---|
 | R0 | Reconciliar baseline y safety gates | CI y auditoría | estado documental coincide con código | CLOSED |
-| U0 | Integrar economía y frontend Showcase Ink | TS, Vitest, build, docs | primera vertical ejecutable y honesta | ACTIVE |
-| U1 | Calidad avanzada y semántica | fixtures y tests | cero, status, plausibilidad y cobertura correctos | PLANNED |
-| U2 | Energía y métricas físicas | fórmulas y golden manuales | W→kWh y balance reproducibles | PLANNED |
+| U0 | Integrar economía y frontend Showcase Ink | TS, Vitest, build, docs | primera vertical ejecutable y honesta | TECHNICALLY_VERIFIED_HUMAN_GATE |
+| U1 | Calidad avanzada y semántica | fixtures y tests | cero, status, plausibilidad, consistencia y safety gates | ENGINEERING_CLOSED |
+| U2 | Energía y métricas físicas | fórmulas y golden manuales | W→kWh y balance reproducibles | NEXT_PLANNED |
 | U3 | Eventos, reglas y evidencia | golden 17/19 | eventos científicos y reglas reales | PLANNED |
 | U4 | Frontend conectado | Playwright Human-First | carga, timeline y episodios utilizables | PLANNED |
 | U5 | Afinia, cargas y escenarios | golden billing | factura y horarios reproducibles | FOUNDATION_ABSORBED |
@@ -94,66 +95,80 @@ npm run build
 - #25: baseline global de formato;
 - #26: epic de línea unificada.
 
-## Loop activo
+## Loop cerrado
 
-# U0 — Fundación unificada + Showcase Ink
+# U1 — Calidad, semántica y safety gates
 
 ## Goal
 
-Unificar el producto y entregar una primera vertical frontend ejecutable sin fingir conexión con capacidades aún no disponibles.
+Garantizar que los datos canónicos tengan una semántica correcta, calidad
+físicamente razonable y safety gates operativos antes de calcular energía,
+detectar eventos o conectar datos reales al frontend.
 
 ## Context
 
-- R0 fusionado en `main`;
-- antiguo PR #8 cerrado como supersedido;
-- economía E0 absorbida;
-- frontend inexistente en el baseline;
-- Showcase Ink como estándar visual obligatorio.
+- U0 técnicamente verificado (human gate pendiente).
+- `_pv_power` perdía cero medido; estado textual se troncaba a None en merged.
+- `compute_quality_score(total_rows=0)` devolvía 1.0.
+- `_parse_iso_duration` roto (#24).
+- `_evaluate_rules` activaba reglas por presencia de señales.
+- Formato global sin normalizar (#25).
 
-## Action
+## Actions ejecutadas
 
-1. mantener una sola rama y PR activos;
-2. absorber dominio, ADR, workflows y test plan económico;
-3. crear `apps/web` con React, TypeScript, Vite y D3;
-4. implementar navegación Planta, Datos y Economía;
-5. mostrar datos demo con advertencia persistente;
-6. añadir gráfica y tabla alternativa;
-7. bloquear COP sin perfil vigente;
-8. bloquear importación web hasta U4 con razón legible;
-9. añadir arquitectura y QA frontend;
-10. ejecutar CI backend, frontend, documentación y privacidad.
+1. U1.1: semántica de cero y estado (get_text, _pv_power fix, calidad temporal).
+2. U1.2: QualityDimensions aditivas, cobertura temporal por duración, lote vacío→0.
+3. U1.3: plausibilidad universal (NaN, SOC, temperatura absoluta) + perfil.
+4. U1.3.1: contabilidad passed/failed/evaluated con invariante Pydantic.
+5. U1.4.0: corrección de telemetry_grid_power_w e inverter_state en telemetry-only.
+6. U1.4: consistencia entre fuentes basada en perfil (solo SOC probado).
+7. U1.5.0–a: parser ISO puro, validación antes de side effects, CLI tests.
+8. U1.5.1: ruff format global, CI gate global.
+9. U1.5.2: package-lock.json versionado, npm ci en CI.
+10. U1.6: estados de reglas (not_evaluable/evaluated_not_fired/fired), gate LLM.
 
 ## Feedback
 
-- TypeScript strict;
-- Vitest;
-- Vite build;
-- Ruff;
-- mypy;
-- pytest;
-- validación documental;
-- revisión visual y human-first del alcance.
+- Ruff + mypy + pytest + cobertura ≥ 80%.
+- Frontend npm ci + typecheck + test + build.
+- 442 tests, 90.78% cobertura.
+- CI push #123 y PR #124 verdes.
+- Gate global de formato.
+- Zero RuleExecution falsas.
+- LLM omitido sin evidencia.
+- Documentación reconciliada.
 
-## Stop condition
+## Stop condition cumplida
 
-- un solo PR de producto abierto;
-- CI verde;
-- frontend navega y cambia periodo;
-- modo oscuro funciona;
-- datos demo no parecen reales;
-- no aparece COP vigente;
-- D3 tiene tabla alternativa;
-- documentación coincide con la implementación;
-- economía E0 existe en la rama unificada.
+- Cero medido preservado en todas las rutas.
+- Estados textuales sobreviven al join.
+- Lote vacío no obtiene score perfecto.
+- Huecos ponderados por duración.
+- Plausibilidad física con tests positivos y negativos.
+- Límites desde perfiles (o not_configured).
+- Consistencia entre fuentes produce evidencia estructurada.
+- Parser ISO corregido (#24).
+- Formato global normalizado (#25).
+- Ruff, format, mypy, pytest green; cobertura 90.78%.
+- Seed rules not_evaluable; 0 RuleExecution falsas.
+- LLM no invocado sin evidencia.
+- CI completa verde.
+- Documentación reconciliada.
 
-## Human gate
+## Human gates pendientes
 
-El propietario revisa jerarquía, navegación y honestidad del alcance. U0 no valida todavía una planta real.
+- Revisión visual y funcional U0.
+- Signos reales de red y batería.
+- Perfiles de plausibilidad y consistencia para Casabero.
+- Límites técnicos de equipos.
+- Algoritmos y umbrales de reglas U3.
+- Golden cases.
+- Merge a main.
 
 ## Rollback
 
-Cerrar el PR unificado. `main` conserva R0.
+Revertir commits U1 en `develop/solgreen-unified`. Main conserva R0 + U0.
 
 ## Próximo loop exacto
 
-U1: resolver semántica de cero y estados, plausibilidad avanzada, parser ISO y baseline de formato antes de calcular energía o conectar el frontend.
+U2: energía, métricas físicas y signos.

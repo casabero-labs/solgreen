@@ -48,19 +48,19 @@ main → develop/solgreen-unified → un único PR activo
 Solgreen está en **pre-alpha técnico**.
 
 | Loop unificado | Resultado | Estado |
-|---|---|---|
-| U0 | Fundación única, economía E0 y frontend Showcase Ink | EN DESARROLLO |
-| U1 | Calidad avanzada y semántica | PLANIFICADO |
-| U2 | Energía y métricas físicas | PLANIFICADO |
-| U3 | Eventos, reglas y golden cases | PLANIFICADO |
-| U4 | Frontend conectado y Human-First E2E | PLANIFICADO |
-| U5 | Motor económico Afinia y cargas | FUNDACIÓN ABSORBIDA |
-| U6 | IA validada con evidencias estables | BLOQUEADO |
-| U7 | PDF, deploy y operación | PLANIFICADO |
+|---|---|---|---|
+| U0 | Fundación única, economía E0 y frontend Showcase Ink | TECHNICALLY VERIFIED, HUMAN GATE PENDING |
+| U1 | Calidad avanzada, semántica y safety gates | ENGINEERING CLOSED |
+| U2 | Energía y métricas físicas | NEXT PLANNED |
+| U3 | Eventos, reglas y golden cases | PLANNED |
+| U4 | Frontend conectado y Human-First E2E | PLANNED |
+| U5 | Motor económico Afinia y cargas | FOUNDATION ABSORBED |
+| U6 | IA validada con evidencias estables | BLOCKED BY U3 |
+| U7 | PDF, deploy y operación | PLANNED |
 
 La auditoría del baseline está en [`docs/qa_reports/DEVELOPMENT_AUDIT_2026-07-20.md`](docs/qa_reports/DEVELOPMENT_AUDIT_2026-07-20.md).
 
-> Las reglas seed, los episodios actuales y la integración LLM son experimentales. No deben emitir diagnósticos reales hasta cerrar U1–U3 y sus golden cases.
+> Las reglas seed, los episodios actuales y la integración LLM son experimentales. No deben emitir diagnósticos reales hasta cerrar U3 y sus golden cases. Las seed rules están explícitamente marcadas como `planned` (no implementadas); el LLM se omite cuando no existe evidencia de reglas fired validada.
 
 ## Frontend
 
@@ -122,8 +122,9 @@ PostgreSQL + object storage + workers
 ```bash
 uv sync --extra dev --frozen
 uv run ruff check .
+uv run ruff format --check .
 uv run mypy solgreen
-uv run pytest
+uv run pytest --cov=solgreen --cov-fail-under=80
 ```
 
 Uso actual de importación:
@@ -138,10 +139,14 @@ uv run solgreen import -f tests/fixtures/telemetry_small.csv -o out/ --no-db
 
 ```bash
 cd apps/web
-npm install --no-audit --no-fund
-npm run check
+npm ci --no-audit --no-fund
+npm run typecheck
+npm run test
+npm run build
 npm run dev
 ```
+
+El `package-lock.json` está versionado para instalaciones reproducibles.
 
 ## Documentación clave
 

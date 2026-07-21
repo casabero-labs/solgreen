@@ -40,10 +40,10 @@ Cada loop dentro del PR unificado debe:
 ## 4. Secuencia U0–U7
 
 | Loop | Resultado | Dependencias | Estado |
-|---|---|---|---|
+|---|---|---|---|---|
 | U0 | Fundación unificada y frontend Showcase Ink ejecutable | R0 | TECHNICALLY_VERIFIED_HUMAN_GATE |
-| U1 | Calidad avanzada y semántica correcta | U0, #21 | PLANNED |
-| U2 | Energía y métricas físicas | U1 | PLANNED |
+| U1 | Calidad, semántica y safety gates | U0, #21 | ENGINEERING_CLOSED |
+| U2 | Energía y métricas físicas | U1 | NEXT_PLANNED |
 | U3 | Eventos, reglas y golden cases | U2, #20 | PLANNED |
 | U4 | Frontend conectado y flujos human-first | U3 | PLANNED |
 | U5 | Inteligencia económica Afinia | U2, U4 | FOUNDATION_ABSORBED |
@@ -104,18 +104,140 @@ Revisión visual y funcional antes de marcar U0 cerrado. El frontend aún no con
 
 Cerrar el PR unificado. `main` conserva R0 sin el frontend ni la integración económica.
 
-## 6. U1 — Calidad y semántica
+## 6. U1 — Calidad, semántica y safety gates
 
-Resuelve primero los errores que contaminan todo lo posterior:
+### Goal
 
-- conservar cero medido;
-- conservar estados textuales;
-- score no perfecto para lote vacío;
-- huecos ponderados por duración;
-- plausibilidad de SOC, voltaje, frecuencia y temperatura;
-- consistencia entre fuentes;
-- parser ISO de tolerancia #24;
-- formato global #25.
+Garantizar que los datos canónicos tengan una semántica correcta, calidad
+físicamente razonable y safety gates operativos antes de calcular energía,
+detectar eventos o conectar datos reales al frontend.
+
+### Entregables
+
+**U1.1 — Semántica de cero y estado:**
+- `_pv_power` preserva 0.0 medido (no colapsa a None).
+- `get_text(canonical_name) -> str | None` para señales textuales.
+- `telemetry_inverter_state` preservado como `str | None` en merged y
+  telemetry-only.
+- Sin conversión de cero en ausencia, apagado o falla.
+
+**U1.2 — Calidad temporal y dimensiones:**
+- `QualityDimensions` (completeness, temporal_coverage,
+  duplicate_integrity, plausibility_score, consistency_score).
+- `QualityResult.quality_score` conservado como campo serializado.
+- `compute_temporal_dimensions` y `aggregate_quality_score` con pesos
+  nombrados: `DUPLICATE_INTEGRITY_WEIGHT=0.60`,
+  `TEMPORAL_COVERAGE_WEIGHT=0.40`.
+- `missing_duration = Σ max(gap_duration − expected_interval, 0)`.
+- `temporal_coverage = covered_duration / analysis_span`.
+- Lote vacío: completeness=0.0, temporal_coverage=0.0, quality_score=0.0.
+- Sin ventana temporal explícita (profile.window) aún.
+
+**U1.3 — Plausibilidad:**
+- Valores no finitos (NaN, +Inf, −Inf) → finding inmediato.
+- SOC universal [0, 100] → evaluated+passed dentro del rango,
+  evaluated+failed fuera.
+- Temperatura < −273.15 °C → failed; temperatura válida sin perfil →
+  not_configured.
+- Rangos configurados por perfil (MeasurementPlausibilityProfile) para
+  voltaje, frecuencia, temperatura. Sin hardcode de límites operativos
+  (normalMinSocPct, overvoltageV, etc.).
+- Sin máximo de temperatura genérico (podría ser evento real).
+- Sin peso inventado para plausibilidad en score global.
+
+**U1.3.1 — Contabilidad correcta:**
+- evaluated_count == passed_count + failed_count.
+- score is None ⇔ evaluated_count == 0.
+- score == passed_count / evaluated_count.
+- Invariante validado via Pydantic model_validator.
+
+**U1.4.0 — Corrección de timeline:**
+- `telemetry_grid_power_w` ahora usa `total_active_power_of_the_grid_w`
+  (no `potencia_total_ca_w`).
+- `telemetry_inverter_state` en telemetry-only usa `get_text`.
+
+**U1.4 — Consistencia entre fuentes:**
+- `ConsistencyPair`, `MeasurementConsistencyProfile`.
+- Solo muestras `source=merged`.
+- Tolerancia: `max(absolute_tolerance, relative_tolerance × max(|a|,|b|))`.
+- SOC flow↔telemetry como único par seguro probado; sin comparaciones
+  automáticas de potencia.
+- Score = passed/evaluated; skipped contadores no participan.
+
+**U1.5.0 — Parser ISO 8601:**
+- `parse_iso_duration(value: str) -> timedelta`.
+- Soporte: D, H, M, S + fraccionales hasta 6 dígitos.
+- Rechazo de PT0S, negativos, meses/años, formatos humanos, minúsculas,
+  basura al final, precisión excedida.
+- Validación antes de side effects en CLI.
+
+**U1.5.1 — Formato global:**
+- `ruff format .` sobre 14 archivos, AST equivalente.
+- CI gate global: `ruff format --check --diff .`.
+
+**U1.5.2 — npm reproducible:**
+- `package-lock.json` versionado.
+- CI usa `npm ci`.
+- CI exige presencia de `package-lock.json`.
+
+**U1.6 — Rule evaluation y LLM gate:**
+- `RuleImplementationStatus` (planned/implemented).
+- `RuleEvaluationOutcome` con invariantes (not_evaluable sin execution,
+  fired con evidence no vacía).
+- `evaluate_rule_catalog` con registro vacío de producción.
+- `eligible_fired_rules`:
+  - fired=False → excluida.
+  - fired=True sin evidence → excluida.
+  - fired=True con evidence → elegible.
+- Seed rules (DATA-001, BAT-001, PV-001, GRID-003, INV-002):
+  `planned`, cinco outcomes `not_evaluable`, 0 ejecuciones persistidas.
+- LLM no invocado sin reglas elegibles; mensaje
+  `LLM skipped: no validated fired-rule evidence`.
+
+### Feedback
+
+```text
+Python: Ruff + format + mypy + pytest + coverage ≥ 80%
+Frontend: npm ci + TypeScript + Vitest + Vite build
+Docs: QA report U1
+Humano: revisión de signos, perfiles y umbrales
+```
+
+Evidencia técnica: [`../qa_reports/U1_DATA_QUALITY_RESULTS_2026-07-21.md`](../qa_reports/U1_DATA_QUALITY_RESULTS_2026-07-21.md).
+
+### Stop condition
+
+- Cero medido preservado en todas las rutas.
+- Estados textuales sobreviven al merge.
+- Lote vacío no obtiene score perfecto.
+- Huecos ponderados por duración.
+- Plausibilidad física con tests positivos y negativos.
+- Límites desde perfiles (o not_configured).
+- Consistencia: solo pares declarados, evidencia estructurada.
+- Parser ISO corregido (#24).
+- Formato global normalizado (#25).
+- Ruff, format, mypy, pytest green; cobertura ≥ 80%.
+- Seed rules not_evaluable; 0 RuleExecution falsas.
+- LLM no invocado sin evidencia.
+- CI completa verde.
+- Documentación reconciliada.
+
+La condición técnica está cumplida.
+
+### Human gates
+- Revisión visual y funcional U0.
+- Signos reales de red y batería.
+- Perfiles de plausibilidad y consistencia para Casabero.
+- Límites técnicos de equipos.
+- Algoritmos y umbrales de reglas U3.
+- Golden cases.
+- Merge a main.
+
+### Rollback
+Revertir commits U1 en `develop/solgreen-unified`. Main conserva R0 + U0.
+
+### Próximo loop exacto
+U2: energía, métricas físicas y perfiles de signo.
 
 ## 7. U2 — Energía y métricas
 
@@ -207,6 +329,6 @@ Durante la línea unificada:
 
 ## 14. Estado actual + próximo paso exacto
 
-**Estado actual:** R0 fusionado; economía E0 absorbida; U0 técnicamente verificado y pendiente de revisión humana sobre el PR #27.
+**Estado actual:** R0 fusionado; economía E0 absorbida; U0 técnicamente verificado con human gate pendiente; U1 ENGINEERING_CLOSED con 442 tests y CI verde.
 
-**Próximo paso exacto:** revisar visual y funcionalmente el frontend U0; después cerrar U0 e iniciar U1 dentro de la misma rama y el mismo PR, sin abrir otra línea de desarrollo.
+**Próximo paso exacto:** U2.0 — Energy semantics, sign profiles and integration contract discovery.
