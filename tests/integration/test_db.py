@@ -125,7 +125,10 @@ class TestImportBatchRepo:
 @pytest.mark.skipif(not _has_db(), reason="No database available")
 class TestCanonicalSampleRepo:
     def test_save_and_get(
-        self, repo: Psycopg2Repository, sample_batch: ImportBatch, sample_samples: list[CanonicalSample]
+        self,
+        repo: Psycopg2Repository,
+        sample_batch: ImportBatch,
+        sample_samples: list[CanonicalSample],
     ) -> None:
         repo.save_import_batch(sample_batch)
         repo.save_canonical_samples(sample_batch.id, sample_samples)

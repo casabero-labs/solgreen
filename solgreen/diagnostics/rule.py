@@ -53,6 +53,4 @@ class RuleExecution(BaseModel):
         default=(),
         description="Evidencias producidas por la evaluación.",
     )
-    input_checksum: str = Field(
-        description="SHA-256 de los inputs usados para la evaluación."
-    )
+    input_checksum: str = Field(description="SHA-256 de los inputs usados para la evaluación.")

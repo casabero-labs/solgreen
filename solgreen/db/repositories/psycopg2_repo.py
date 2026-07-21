@@ -119,9 +119,7 @@ class Psycopg2Repository(Repository):
             created_at=_ts(row["created_at"]),
         )
 
-    def save_canonical_samples(
-        self, batch_id: UUID, samples: list[CanonicalSample]
-    ) -> None:
+    def save_canonical_samples(self, batch_id: UUID, samples: list[CanonicalSample]) -> None:
         sql = """
             INSERT INTO canonical_samples (
                 batch_id, timestamp_axis, source, time_delta,
@@ -199,9 +197,7 @@ class Psycopg2Repository(Repository):
             confidence=row.get("confidence", 1.0),
         )
 
-    def save_canonical_episode(
-        self, batch_id: UUID, episode: CanonicalEpisode
-    ) -> int:
+    def save_canonical_episode(self, batch_id: UUID, episode: CanonicalEpisode) -> int:
         sql = """
             INSERT INTO canonical_episodes (
                 batch_id, episode_type, start, "end", duration,
@@ -256,9 +252,7 @@ class Psycopg2Repository(Repository):
             signals=signals,
         )
 
-    def save_rule_execution(
-        self, episode_id: int, execution: RuleExecution
-    ) -> None:
+    def save_rule_execution(self, episode_id: int, execution: RuleExecution) -> None:
         sql = """
             INSERT INTO rule_executions (
                 episode_id, rule_id, rule_version, period_start, period_end,
@@ -308,9 +302,7 @@ class Psycopg2Repository(Repository):
             input_checksum=row["input_checksum"],
         )
 
-    def save_llm_interpretation(
-        self, episode_id: int, interpretation: LLMInterpretation
-    ) -> None:
+    def save_llm_interpretation(self, episode_id: int, interpretation: LLMInterpretation) -> None:
         sql = """
             INSERT INTO llm_interpretations (
                 episode_id, summary, hypotheses, alternatives,
@@ -323,7 +315,11 @@ class Psycopg2Repository(Repository):
             )
         """
         hyps = [
-            {"description": h.description, "support_level": h.support_level, "evidence_refs": list(h.evidence_refs)}
+            {
+                "description": h.description,
+                "support_level": h.support_level,
+                "evidence_refs": list(h.evidence_refs),
+            }
             for h in interpretation.hypotheses
         ]
         params = {
@@ -343,9 +339,7 @@ class Psycopg2Repository(Repository):
             cur.execute(sql, params)
         self.conn.commit()
 
-    def get_llm_interpretations(
-        self, episode_id: int
-    ) -> list[LLMInterpretation]:
+    def get_llm_interpretations(self, episode_id: int) -> list[LLMInterpretation]:
         sql = """
             SELECT * FROM llm_interpretations
             WHERE episode_id = %(episode_id)s

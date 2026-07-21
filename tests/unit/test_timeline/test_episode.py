@@ -31,6 +31,7 @@ def _sample(
 # _derive_episode_type
 # ---------------------------------------------------------------------------
 
+
 class TestDeriveEpisodeType:
     def test_pv_production(self) -> None:
         samples = [
@@ -74,6 +75,7 @@ class TestDeriveEpisodeType:
 # ---------------------------------------------------------------------------
 # build_episodes
 # ---------------------------------------------------------------------------
+
 
 class TestBuildEpisodes:
     def test_single_group_no_gaps(self) -> None:

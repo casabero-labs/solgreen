@@ -43,17 +43,13 @@ class MockRepository(Repository):
     def list_import_batches(self, plant_id: str) -> list[ImportBatch]:
         return [b for b in self.batches.values() if b.plant_id == plant_id]
 
-    def save_canonical_samples(
-        self, batch_id: Any, samples: list[CanonicalSample]
-    ) -> None:
+    def save_canonical_samples(self, batch_id: Any, samples: list[CanonicalSample]) -> None:
         self.samples[batch_id] = samples
 
     def get_canonical_samples(self, batch_id: Any) -> list[CanonicalSample]:
         return self.samples.get(batch_id, [])
 
-    def save_canonical_episode(
-        self, batch_id: Any, episode: CanonicalEpisode
-    ) -> int:
+    def save_canonical_episode(self, batch_id: Any, episode: CanonicalEpisode) -> int:
         self._episode_counter += 1
         ep_id = self._episode_counter
         self.episodes.setdefault(batch_id, []).append(episode)
@@ -62,17 +58,13 @@ class MockRepository(Repository):
     def get_canonical_episodes(self, batch_id: Any) -> list[CanonicalEpisode]:
         return self.episodes.get(batch_id, [])
 
-    def save_rule_execution(
-        self, episode_id: int, execution: Any
-    ) -> None:
+    def save_rule_execution(self, episode_id: int, execution: Any) -> None:
         self.executions.setdefault(episode_id, []).append(execution)
 
     def get_rule_executions(self, episode_id: int) -> list[Any]:
         return self.executions.get(episode_id, [])
 
-    def save_llm_interpretation(
-        self, episode_id: int, interpretation: Any
-    ) -> None:
+    def save_llm_interpretation(self, episode_id: int, interpretation: Any) -> None:
         self.interpretations.setdefault(episode_id, []).append(interpretation)
 
     def get_llm_interpretations(self, episode_id: int) -> list[Any]:
@@ -96,7 +88,9 @@ def _make_episode(
         sample_count=12,
         coverage_pct=95.0,
         source_summary="merged",
-        signals=signals if signals is not None else {"flow_soc_pct": 75.0, "telemetry_pv_power_w": 3500.0},
+        signals=signals
+        if signals is not None
+        else {"flow_soc_pct": 75.0, "telemetry_pv_power_w": 3500.0},
     )
 
 
@@ -240,14 +234,17 @@ def test_cli_import_align_with_llm_provider(tmp_path: Path) -> None:
 
         def complete(self, prompt: str, *, max_tokens: int = 2000) -> str:
             import json
-            return json.dumps({
-                "summary": "Test LLM summary.",
-                "hypotheses": [],
-                "alternatives": [],
-                "missing_info": [],
-                "suggested_actions": [],
-                "warnings": [],
-            })
+
+            return json.dumps(
+                {
+                    "summary": "Test LLM summary.",
+                    "hypotheses": [],
+                    "alternatives": [],
+                    "missing_info": [],
+                    "suggested_actions": [],
+                    "warnings": [],
+                }
+            )
 
     dummy = DummyProvider()
     with (

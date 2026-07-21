@@ -106,13 +106,8 @@ def write_report_json(
         if batch.quality_summary and batch.quality_summary.rows_rejected == 0
         else ParserStatus.PARTIAL.value,
     }
-    if (
-        batch.quality_summary is not None
-        and batch.quality_summary.quality_result is not None
-    ):
-        payload["quality_analysis"] = batch.quality_summary.quality_result.model_dump(
-            mode="json"
-        )
+    if batch.quality_summary is not None and batch.quality_summary.quality_result is not None:
+        payload["quality_analysis"] = batch.quality_summary.quality_result.model_dump(mode="json")
     text = json.dumps(payload, indent=2, ensure_ascii=False)
     if isinstance(output, Path):
         output.write_text(text, encoding="utf-8")

@@ -13,9 +13,7 @@ def validate_interpretation(
     if not interp.summary.strip():
         errors.append("summary must not be empty")
 
-    fired_evidence_count = sum(
-        len(r.evidence) for r in input_data.fired_rules if r.fired
-    )
+    fired_evidence_count = sum(len(r.evidence) for r in input_data.fired_rules if r.fired)
 
     for i, hyp in enumerate(interp.hypotheses):
         for ref in hyp.evidence_refs:

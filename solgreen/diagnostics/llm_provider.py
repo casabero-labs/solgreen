@@ -20,13 +20,11 @@ class LLMProvider(ABC):
 
     @property
     @abstractmethod
-    def provider_name(self) -> str:
-        ...
+    def provider_name(self) -> str: ...
 
     @property
     @abstractmethod
-    def default_model(self) -> str:
-        ...
+    def default_model(self) -> str: ...
 
 
 class _ChatCompletionMixin:
@@ -107,19 +105,11 @@ class FallbackProvider(LLMProvider):
 
     @property
     def provider_name(self) -> str:
-        return (
-            self._fallback.provider_name
-            if self._used_fallback
-            else self._primary.provider_name
-        )
+        return self._fallback.provider_name if self._used_fallback else self._primary.provider_name
 
     @property
     def default_model(self) -> str:
-        return (
-            self._fallback.default_model
-            if self._used_fallback
-            else self._primary.default_model
-        )
+        return self._fallback.default_model if self._used_fallback else self._primary.default_model
 
     @property
     def used_fallback(self) -> bool:

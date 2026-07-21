@@ -32,15 +32,15 @@ class CanonicalEpisode(BaseModel):
     duration: timedelta = Field(description="Diferencia end - start.")
     sample_count: int = Field(description="Número de muestras en el grupo.")
     coverage_pct: float = Field(
-        ge=0.0, le=100.0,
-        description="Porcentaje de muestras con confidence > 0.5 vs total teórico (5min)."
+        ge=0.0,
+        le=100.0,
+        description="Porcentaje de muestras con confidence > 0.5 vs total teórico (5min).",
     )
     source_summary: Literal["merged", "flow_only", "telemetry_only", "mixed"] = Field(
         description="Procedencia predominante de las muestras del grupo."
     )
     signals: dict[str, float] = Field(
-        default_factory=dict,
-        description="Promedio de señales numéricas no-None en el grupo."
+        default_factory=dict, description="Promedio de señales numéricas no-None en el grupo."
     )
 
 
@@ -51,15 +51,20 @@ def _derive_episode_type(samples: list[CanonicalSample]) -> str:
 
     for s in samples:
         has_pv = (
-            (s.flow_potencia_produccion_w is not None and s.flow_potencia_produccion_w > 0)
-            or (s.telemetry_pv_power_w is not None and s.telemetry_pv_power_w > 0)
+            s.flow_potencia_produccion_w is not None and s.flow_potencia_produccion_w > 0
+        ) or (s.telemetry_pv_power_w is not None and s.telemetry_pv_power_w > 0)
+        is_standby = (
+            s.telemetry_inverter_state is not None
+            and s.telemetry_inverter_state.lower()
+            in (
+                "standby",
+                "idle",
+                "waiting",
+                "fault",
+            )
         )
-        is_standby = s.telemetry_inverter_state is not None and s.telemetry_inverter_state.lower() in (
-            "standby", "idle", "waiting", "fault",
-        )
-        has_grid = (
-            (s.flow_grid_w is not None and s.flow_grid_w > 0)
-            or (s.telemetry_grid_power_w is not None and s.telemetry_grid_power_w > 0)
+        has_grid = (s.flow_grid_w is not None and s.flow_grid_w > 0) or (
+            s.telemetry_grid_power_w is not None and s.telemetry_grid_power_w > 0
         )
 
         if has_pv:
