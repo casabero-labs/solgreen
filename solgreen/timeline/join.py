@@ -7,7 +7,9 @@ from solgreen.contracts.inverter_telemetry import InverterTelemetrySample
 from solgreen.contracts.plant_flow import PlantFlowSample
 from solgreen.timeline.canonical import CanonicalSample
 
-DEFAULT_TOLERANCE: Annotated[timedelta, Field(description="Mitad del intervalo de muestreo de 5 min.")] = timedelta(minutes=2, seconds=30)
+DEFAULT_TOLERANCE: Annotated[
+    timedelta, Field(description="Mitad del intervalo de muestreo de 5 min.")
+] = timedelta(minutes=2, seconds=30)
 
 
 def join_by_tolerance(
@@ -31,8 +33,8 @@ def join_by_tolerance(
                 continue
             delta = abs(t.timestamp_utc - f.timestamp_utc)
             if delta <= tolerance and (best_delta is None or delta < best_delta):
-                    best_delta = delta
-                    best_idx = idx
+                best_delta = delta
+                best_idx = idx
 
         if best_idx is not None:
             used_telemetry.add(best_idx)
@@ -84,7 +86,9 @@ def join_by_tolerance(
                     telemetry_grid_power_w=t.get_float("potencia_total_ca_w"),
                     telemetry_battery_power_w=t.get_float("potencia_de_bateria_w"),
                     telemetry_soc_pct=t.get_float("soc_pct"),
-                    telemetry_inverter_state=t.signals.get("current_state_of_machine") if t.signals.get("current_state_of_machine") is not None else None,
+                    telemetry_inverter_state=t.signals.get("current_state_of_machine")
+                    if t.signals.get("current_state_of_machine") is not None
+                    else None,
                     quality_level="measured",
                     confidence=1.0,
                 )
