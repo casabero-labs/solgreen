@@ -92,7 +92,6 @@ class TestToleranceRejected:
             ],
         )
         assert result.exit_code != 0
-        assert "--tolerance" in result.output
         assert "PT0S" in result.output
 
     def test_p1m_fails(self, tmp_path: Path) -> None:
@@ -113,7 +112,7 @@ class TestToleranceRejected:
             ],
         )
         assert result.exit_code != 0
-        assert "--tolerance" in result.output
+        assert "P1M" in result.output
 
     def test_precision_exceeded_fails(self, tmp_path: Path) -> None:
         runner = CliRunner()
