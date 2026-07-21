@@ -1,5 +1,7 @@
 from datetime import UTC, datetime, timedelta
 
+import pytest
+
 from solgreen.contracts.enums import SourceType
 from solgreen.contracts.inverter_telemetry import InverterTelemetrySample
 from solgreen.contracts.plant_flow import PlantFlowSample
@@ -35,7 +37,10 @@ class TestAnalyzeTelemetry:
         assert result.ordering.was_strict is True
         assert result.duplicates == ()
         assert result.gaps == ()
-        assert result.quality_score == 1.0
+        assert result.quality_score == 0.0
+        assert result.dimensions.temporal_coverage == 0.0
+        assert result.dimensions.duplicate_integrity == 1.0
+        assert result.dimensions.completeness == 0.0
 
     def test_clean_batch(self) -> None:
         samples = [
@@ -50,6 +55,8 @@ class TestAnalyzeTelemetry:
         assert result.duplicates == ()
         assert result.gaps == ()
         assert result.quality_score == 1.0
+        assert result.dimensions.temporal_coverage == 1.0
+        assert result.dimensions.duplicate_integrity == 1.0
 
     def test_detects_duplicates(self) -> None:
         ts = datetime(2026, 7, 17, 12, 0, tzinfo=UTC)
@@ -63,6 +70,7 @@ class TestAnalyzeTelemetry:
         assert len(result.duplicates) == 1
         assert result.duplicates[0].count == 2
         assert result.quality_score < 1.0
+        assert result.dimensions.duplicate_integrity < 1.0
 
     def test_detects_gaps(self) -> None:
         samples = [
@@ -72,6 +80,7 @@ class TestAnalyzeTelemetry:
         result = analyze_telemetry(samples, SourceType.SOLARMAN_INVERTER_TELEMETRY)
         assert len(result.gaps) == 1
         assert result.gaps[0].gap_ratio == 12.0
+        assert result.dimensions.temporal_coverage == pytest.approx(5 / 60, abs=1e-9)
 
     def test_custom_interval(self) -> None:
         samples = [
@@ -84,13 +93,16 @@ class TestAnalyzeTelemetry:
             expected_interval=timedelta(minutes=30),
         )
         assert result.gaps == ()
+        assert result.dimensions.temporal_coverage == 1.0
 
 
 class TestAnalyzePlantFlow:
     def test_empty_batch_flow(self) -> None:
         result = analyze_plant_flow([], SourceType.SOLARMAN_PLANT_FLOW)
         assert result.total_rows == 0
-        assert result.quality_score == 1.0
+        assert result.quality_score == 0.0
+        assert result.dimensions.temporal_coverage == 0.0
+        assert result.dimensions.completeness == 0.0
 
     def test_clean_batch_flow(self) -> None:
         samples = [

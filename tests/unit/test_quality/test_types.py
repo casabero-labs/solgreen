@@ -7,9 +7,19 @@ from solgreen.contracts.enums import SourceType
 from solgreen.quality._types import (
     DuplicateTimestamp,
     OrderingInfo,
+    QualityDimensions,
     QualityResult,
     TemporalGap,
 )
+
+
+def _dimensions(**kwargs: object) -> QualityDimensions:
+    base: dict[str, object] = {
+        "temporal_coverage": 1.0,
+        "duplicate_integrity": 1.0,
+    }
+    base.update(kwargs)
+    return QualityDimensions(**base)  # type: ignore[arg-type]
 
 
 class TestDuplicateTimestamp:
@@ -80,6 +90,7 @@ class TestQualityResult:
             duplicates=(),
             gaps=(),
             quality_score=1.0,
+            dimensions=_dimensions(),
         )
         assert result.has_issues is False
 
@@ -97,6 +108,7 @@ class TestQualityResult:
             duplicates=(dup,),
             gaps=(),
             quality_score=0.9,
+            dimensions=_dimensions(duplicate_integrity=0.5),
         )
         assert result.has_issues is True
 
@@ -115,5 +127,56 @@ class TestQualityResult:
             duplicates=(),
             gaps=(gap,),
             quality_score=0.8,
+            dimensions=_dimensions(temporal_coverage=0.7),
         )
         assert result.has_issues is True
+
+    def test_model_dump_contains_all_required_fields(self) -> None:
+        result = QualityResult(
+            source_type=SourceType.SOLARMAN_INVERTER_TELEMETRY,
+            total_rows=10,
+            ordering=OrderingInfo(was_ordered=True, was_strict=True),
+            duplicates=(),
+            gaps=(),
+            quality_score=0.94,
+            dimensions=_dimensions(
+                completeness=0.8,
+                temporal_coverage=0.9,
+                duplicate_integrity=1.0,
+            ),
+        )
+        dumped = result.model_dump()
+        assert "quality_score" in dumped
+        assert "dimensions" in dumped
+        dims = dumped["dimensions"]
+        assert "temporal_coverage" in dims
+        assert "duplicate_integrity" in dims
+        assert "completeness" in dims
+        assert "plausibility_score" in dims
+        assert "consistency_score" in dims
+
+    def test_model_dump_json_contains_all_required_fields(self) -> None:
+        result = QualityResult(
+            source_type=SourceType.SOLARMAN_INVERTER_TELEMETRY,
+            total_rows=10,
+            ordering=OrderingInfo(was_ordered=True, was_strict=True),
+            duplicates=(),
+            gaps=(),
+            quality_score=0.94,
+            dimensions=_dimensions(
+                completeness=0.8,
+                temporal_coverage=0.9,
+                duplicate_integrity=1.0,
+            ),
+        )
+        json_str = result.model_dump_json()
+        for field in (
+            "quality_score",
+            "dimensions",
+            "temporal_coverage",
+            "duplicate_integrity",
+            "completeness",
+            "plausibility_score",
+            "consistency_score",
+        ):
+            assert field in json_str, f"{field} missing from model_dump_json()"
