@@ -45,8 +45,14 @@ The profile declares:
 
 A profile with `status = unknown` forbids normalization. A profile
 with `status = provisional` forbids fiscal presentation. Only
-`status = confirmed` with cited evidence allows normalization and
-energy calculation.
+`status = confirmed` with cited evidence allows directional
+normalization and operational energy estimation.
+
+A confirmed sign profile confirms direction semantics only.
+It does not change the authority class of the source.
+SolarMAN and inverter telemetry remain operational sources.
+Fiscal meter, official invoice and utility records remain the
+sole fiscal authorities.
 
 ### 2. Directional Magnitudes Do Not Replace Raw Values
 
@@ -74,9 +80,17 @@ trapezoidal, sample-and-hold, or interval average) depends on what
 each sample represents temporally: instantaneous reading, interval
 average, or held value.
 
-U2.0 does **not** select the method. U2.1 will select after gathering
-evidence about temporal semantics of each source. Until then, no Wh
-or kWh values are produced.
+U2.0 does **not** select the method. U2.2 will select and implement
+the integration method after temporal semantics evidence is available.
+Until then, no Wh or kWh values are produced.
+
+### Sequence division
+
+- **U2.1** — contracts (PowerSignProfile, registry), defensive directional
+  normalization functions (pure, profile-gated, no real Casabero profiles).
+- **U2.2** — temporal integration W→Wh and EnergyInterval/EnergySummary
+  models; integration method selection depends on U2.0 temporal semantics
+  evidence.
 
 ### 4. Gaps Are Not Interpolated
 

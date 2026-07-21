@@ -65,11 +65,13 @@ operational energy metrics.
 ### Confirmation Status Definitions
 
 | Status | Meaning | Permitted actions |
-|---|---|---|
-| `confirmed` | Sign convention verified with human evidence | Normalization, energy calculation, fiscal presentation |
+|---|---|---|---|
+| `confirmed` | Sign convention verified with human evidence | Directional normalization, operational energy estimation, reconciliation against fiscal sources. Does NOT grant fiscal authority. |
 | `provisional` | Documented from sources, plausible but not verified | Operational estimates, reconciliation, profiles (marked) |
 | `unknown` | No source evidence for sign convention | Cannot normalize, cannot calculate directional energy |
 | `not_applicable` | No sign convention needed (e.g. SOC, state text) | N/A |
+
+A confirmed sign profile confirms direction semantics only. It does not change the authority class of the source. SolarMAN and inverter telemetry remain operational sources even after sign confirmation. Fiscal meter, official invoice and utility records remain the sole fiscal authorities.
 
 ---
 
@@ -270,7 +272,7 @@ The choice of integration method depends on evidence about temporal semantics:
 | Sample-and-hold | `E = P × hold_duration` | Signal is held until next update | Evidence of register/SCADA hold behavior |
 | Interval average | `E = P_avg × Δt` | Source provides average over interval | Explicit column or documentation for power average |
 
-**U2.0 does not select a method.** U2.1 will select after gathering evidence about sample semantics.
+**U2.0 does not select a method.** U2.2 will select and implement the integration method after temporal semantics evidence is available.
 
 ### General Integration Formula
 
@@ -489,7 +491,7 @@ These are U2.1–U2.7 activities.
 
 | Unknown | Deferred to | Reason |
 |---|---|---|
-| Sample temporal semantics (instantaneous vs average) | U2.1 | Requires source documentation or experimental validation |
+| Sample temporal semantics (instantaneous vs average) | U2.2 | Determines integration method; requires source documentation or experimental validation |
 | Integration method selection | U2.2 | Depends on temporal semantics |
 | Grid sign convention for Casabero | Human gate | Requires private data observation |
 | Battery sign convention for Casabero | Human gate | Requires private data observation |
