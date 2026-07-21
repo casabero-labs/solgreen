@@ -108,7 +108,7 @@ _LOAD_DIRECTIONS: frozenset[PowerDirection] = frozenset(
 )
 
 
-def _field_source_compatible(field: CanonicalPowerField, source: SourceSystem) -> bool:
+def is_power_field_source_compatible(field: CanonicalPowerField, source: SourceSystem) -> bool:
     if source is SourceSystem.SOLARMAN_PLANT_FLOW:
         return field in _FLOW_FIELDS
     if source is SourceSystem.INVERTER_TELEMETRY:
@@ -116,6 +116,18 @@ def _field_source_compatible(field: CanonicalPowerField, source: SourceSystem) -
     if source is SourceSystem.FISCAL_METER:
         return False
     return False
+
+
+def validity_intervals_overlap(
+    first_start: datetime,
+    first_end: datetime | None,
+    second_start: datetime,
+    second_end: datetime | None,
+) -> bool:
+    overlap = (first_end is None or second_start < first_end) and (
+        second_end is None or first_start < second_end
+    )
+    return overlap
 
 
 def _field_domain(field: CanonicalPowerField) -> str:
@@ -186,10 +198,26 @@ class PowerSignProfile(BaseModel):
 
     @pydantic.model_validator(mode="after")
     def _validate_field_source_compatibility(self) -> PowerSignProfile:
-        if not _field_source_compatible(self.canonical_field, self.source_system):
+        if not is_power_field_source_compatible(self.canonical_field, self.source_system):
             raise ValueError(
                 f"Source system '{self.source_system}' is not compatible "
                 f"with field '{self.canonical_field}'."
+            )
+        return self
+
+    @pydantic.model_validator(mode="after")
+    def _validate_authority_for_operational_sources(self) -> PowerSignProfile:
+        operational_sources = (
+            SourceSystem.SOLARMAN_PLANT_FLOW,
+            SourceSystem.INVERTER_TELEMETRY,
+        )
+        if (
+            self.source_system in operational_sources
+            and self.authority_class is not AuthorityClass.OPERATIONAL
+        ):
+            raise ValueError(
+                f"Source system '{self.source_system}' requires "
+                f"authority_class=operational, got '{self.authority_class}'."
             )
         return self
 
@@ -312,11 +340,11 @@ class PowerSignProfileRegistry:
                 existing.plant_id == profile.plant_id
                 and existing.canonical_field == profile.canonical_field
                 and existing.source_system == profile.source_system
-                and existing.valid_to is not None
-                and profile.valid_to is not None
-                and not (
-                    profile.valid_to <= existing.valid_from
-                    or profile.valid_from >= existing.valid_to
+                and validity_intervals_overlap(
+                    first_start=existing.valid_from,
+                    first_end=existing.valid_to,
+                    second_start=profile.valid_from,
+                    second_end=profile.valid_to,
                 )
             ):
                 raise ValueError(
@@ -324,20 +352,8 @@ class PowerSignProfileRegistry:
                     f"plant_id='{profile.plant_id}', "
                     f"field='{profile.canonical_field}', "
                     f"source='{profile.source_system}'. "
-                    f"Existing: [{existing.valid_from}, {existing.valid_to}]."
-                )
-            if (
-                existing.plant_id == profile.plant_id
-                and existing.canonical_field == profile.canonical_field
-                and existing.source_system == profile.source_system
-                and existing.valid_to is None
-            ):
-                raise ValueError(
-                    f"Cannot register a new profile with finite valid_to "
-                    f"when an open-ended profile already exists for "
-                    f"plant_id='{profile.plant_id}', "
-                    f"field='{profile.canonical_field}', "
-                    f"source='{profile.source_system}'."
+                    f"Existing: [{existing.valid_from}, {existing.valid_to}), "
+                    f"New: [{profile.valid_from}, {profile.valid_to})."
                 )
         self._profiles.append(profile)
 
@@ -348,6 +364,8 @@ class PowerSignProfileRegistry:
         source_system: SourceSystem,
         timestamp: datetime,
     ) -> PowerSignProfile | None:
+        if timestamp.tzinfo is None or timestamp.utcoffset() is None:
+            raise ValueError(f"resolve() requires timezone-aware timestamp, got naive: {timestamp}")
         candidates: list[PowerSignProfile] = []
         for profile in self._profiles:
             if (

@@ -129,7 +129,7 @@ class TestPowerSignProfile:
     def test_model_frozen(self) -> None:
         p = _make_grid_confirmed()
         with pytest.raises((ValidationError, TypeError)):
-            p.plant_id = "other"  # type: ignore[misc]
+            p.plant_id = "other"
 
     def test_extra_fields_rejected(self) -> None:
         with pytest.raises(ValidationError):
@@ -348,6 +348,82 @@ class TestPowerSignProfile:
                 valid_to=_VALID_TO,
             )
 
+    def test_solarman_fiscal_authority_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="requires authority_class=operational"):
+            PowerSignProfile(
+                plant_id="casabero",
+                canonical_field=CanonicalPowerField.FLOW_GRID,
+                source_system=SourceSystem.SOLARMAN_PLANT_FLOW,
+                authority_class=AuthorityClass.FISCAL,
+                measurement_point="grid_meter",
+                unit="W",
+                positive_means=PowerDirection.GRID_IMPORT,
+                negative_means=PowerDirection.GRID_EXPORT,
+                status=ProfileStatus.CONFIRMED,
+                evidence_refs=("obs:solarman-fiscal-01",),
+                profile_version="1.0.0",
+                valid_from=_BASE_TS,
+                valid_to=_VALID_TO,
+            )
+
+    def test_telemetry_fiscal_authority_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="requires authority_class=operational"):
+            PowerSignProfile(
+                plant_id="casabero",
+                canonical_field=CanonicalPowerField.TELEMETRY_GRID,
+                source_system=SourceSystem.INVERTER_TELEMETRY,
+                authority_class=AuthorityClass.FISCAL,
+                measurement_point="inverter",
+                unit="W",
+                positive_means=PowerDirection.GRID_IMPORT,
+                negative_means=PowerDirection.GRID_EXPORT,
+                status=ProfileStatus.CONFIRMED,
+                evidence_refs=("obs:telemetry-fiscal-01",),
+                profile_version="1.0.0",
+                valid_from=_BASE_TS,
+                valid_to=_VALID_TO,
+            )
+
+    def test_operational_authority_accepted_for_solarman(self) -> None:
+        p = PowerSignProfile(
+            plant_id="casabero",
+            canonical_field=CanonicalPowerField.FLOW_GRID,
+            source_system=SourceSystem.SOLARMAN_PLANT_FLOW,
+            authority_class=AuthorityClass.OPERATIONAL,
+            measurement_point="grid_meter",
+            unit="W",
+            positive_means=PowerDirection.GRID_IMPORT,
+            negative_means=PowerDirection.GRID_EXPORT,
+            status=ProfileStatus.CONFIRMED,
+            evidence_refs=("obs:grid-01",),
+            profile_version="1.0.0",
+            valid_from=_BASE_TS,
+            valid_to=_VALID_TO,
+        )
+        assert p.authority_class is AuthorityClass.OPERATIONAL
+
+    def test_operational_authority_accepted_for_telemetry(self) -> None:
+        p = PowerSignProfile(
+            plant_id="casabero",
+            canonical_field=CanonicalPowerField.TELEMETRY_GRID,
+            source_system=SourceSystem.INVERTER_TELEMETRY,
+            authority_class=AuthorityClass.OPERATIONAL,
+            measurement_point="inverter",
+            unit="W",
+            positive_means=PowerDirection.GRID_IMPORT,
+            negative_means=PowerDirection.GRID_EXPORT,
+            status=ProfileStatus.CONFIRMED,
+            evidence_refs=("obs:grid-02",),
+            profile_version="1.0.0",
+            valid_from=_BASE_TS,
+            valid_to=_VALID_TO,
+        )
+        assert p.authority_class is AuthorityClass.OPERATIONAL
+
+    def test_confirmed_profile_preserves_operational_authority(self) -> None:
+        p = _make_grid_confirmed()
+        assert p.authority_class is AuthorityClass.OPERATIONAL
+
 
 class TestPowerSignProfileRegistry:
     def test_registry_empty_initially(self) -> None:
@@ -475,3 +551,106 @@ class TestPowerSignProfileRegistry:
             timestamp=_BASE_TS,
         )
         assert r1 is r2
+
+    def test_naive_timestamp_rejected_in_resolve(self) -> None:
+        reg = PowerSignProfileRegistry()
+        p = _make_grid_confirmed()
+        reg.register(p)
+        naive_ts = datetime(2026, 7, 21, 12, 0, 0)
+        with pytest.raises(ValueError, match="timezone-aware"):
+            reg.resolve(
+                plant_id="casabero",
+                canonical_field=CanonicalPowerField.FLOW_GRID,
+                source_system=SourceSystem.SOLARMAN_PLANT_FLOW,
+                timestamp=naive_ts,
+            )
+
+    def test_open_interval_overlapping_finite_rejected(self) -> None:
+        reg = PowerSignProfileRegistry()
+        p1 = _make_grid_confirmed(
+            valid_from=_BASE_TS,
+            valid_to=_VALID_TO,
+        )
+        reg.register(p1)
+        p2 = _make_grid_confirmed(
+            valid_from=_BASE_TS + timedelta(days=5),
+            valid_to=None,
+        )
+        with pytest.raises(ValueError, match="Overlapping"):
+            reg.register(p2)
+
+    def test_open_interval_adjacent_to_finite_accepted(self) -> None:
+        reg = PowerSignProfileRegistry()
+        p1 = _make_grid_confirmed(
+            valid_from=_BASE_TS,
+            valid_to=_VALID_TO,
+        )
+        reg.register(p1)
+        p2 = _make_grid_confirmed(
+            valid_from=_VALID_TO,
+            valid_to=None,
+        )
+        reg.register(p2)
+
+    def test_historical_finite_before_open_accepted(self) -> None:
+        reg = PowerSignProfileRegistry()
+        p1 = _make_grid_confirmed(
+            valid_from=_BASE_TS,
+            valid_to=_VALID_TO,
+        )
+        reg.register(p1)
+        p2 = _make_grid_confirmed(
+            valid_from=_BASE_TS - timedelta(days=10),
+            valid_to=_BASE_TS - timedelta(days=1),
+        )
+        reg.register(p2)
+
+    def test_finite_crossing_open_start_rejected(self) -> None:
+        reg = PowerSignProfileRegistry()
+        p1 = _make_grid_confirmed(
+            valid_from=_BASE_TS,
+            valid_to=None,
+        )
+        reg.register(p1)
+        p2 = _make_grid_confirmed(
+            valid_from=_BASE_TS - timedelta(days=5),
+            valid_to=_BASE_TS + timedelta(days=5),
+        )
+        with pytest.raises(ValueError, match="Overlapping"):
+            reg.register(p2)
+
+    def test_open_versus_open_rejected(self) -> None:
+        reg = PowerSignProfileRegistry()
+        p1 = _make_grid_confirmed(
+            valid_from=_BASE_TS,
+            valid_to=None,
+        )
+        reg.register(p1)
+        p2 = _make_grid_confirmed(
+            valid_from=_BASE_TS + timedelta(days=1),
+            valid_to=None,
+        )
+        with pytest.raises(ValueError, match="Overlapping"):
+            reg.register(p2)
+
+    def test_reverse_registration_order_yields_same_decision(self) -> None:
+        reg1 = PowerSignProfileRegistry()
+        p1 = _make_grid_confirmed(
+            plant_id="plant1",
+            valid_from=_BASE_TS,
+            valid_to=_VALID_TO,
+        )
+        p2 = _make_grid_confirmed(
+            plant_id="plant1",
+            valid_from=_VALID_TO,
+            valid_to=None,
+        )
+        reg1.register(p1)
+        reg1.register(p2)
+
+        reg2 = PowerSignProfileRegistry()
+        reg2.register(p2)
+        reg2.register(p1)
+
+        assert reg1.count == 2
+        assert reg2.count == 2

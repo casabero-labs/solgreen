@@ -12,6 +12,8 @@ from solgreen.energy.sign_profiles import (
     ProfileStatus,
     SourceSystem,
     build_production_sign_profile_registry,
+    is_power_field_source_compatible,
+    validity_intervals_overlap,
 )
 
 __all__ = [
@@ -25,5 +27,7 @@ __all__ = [
     "ProfileStatus",
     "SourceSystem",
     "build_production_sign_profile_registry",
+    "is_power_field_source_compatible",
     "normalize_power_value",
+    "validity_intervals_overlap",
 ]
