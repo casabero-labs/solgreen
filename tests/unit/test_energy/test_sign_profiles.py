@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, tzinfo
 
 import pytest
 from pydantic import ValidationError
@@ -654,3 +654,68 @@ class TestPowerSignProfileRegistry:
 
         assert reg1.count == 2
         assert reg2.count == 2
+
+
+class _NoUtcoffsetTzInfo(tzinfo):
+    """Synthetic tzinfo that exists but utcoffset() returns None."""
+
+    def utcoffset(self, dt: datetime | None) -> timedelta | None:
+        return None
+
+    def dst(self, dt: datetime | None) -> timedelta | None:
+        return None
+
+    def tzname(self, dt: datetime | None) -> str:
+        return "no-utcoffset"
+
+
+class TestTimezoneAwareEnforcement:
+    def test_valid_from_with_no_utcoffset_tzinfo_rejected(self) -> None:
+        tz = _NoUtcoffsetTzInfo()
+        with pytest.raises(ValidationError, match="timezone-aware"):
+            PowerSignProfile(
+                plant_id="casabero",
+                canonical_field=CanonicalPowerField.FLOW_GRID,
+                source_system=SourceSystem.SOLARMAN_PLANT_FLOW,
+                authority_class=AuthorityClass.OPERATIONAL,
+                measurement_point="grid_meter",
+                unit="W",
+                positive_means=PowerDirection.GRID_IMPORT,
+                negative_means=PowerDirection.GRID_EXPORT,
+                status=ProfileStatus.CONFIRMED,
+                evidence_refs=("obs:tz-01",),
+                profile_version="1.0.0",
+                valid_from=datetime(2026, 7, 21, 12, 0, 0, tzinfo=tz),
+                valid_to=_VALID_TO,
+            )
+
+    def test_valid_to_with_no_utcoffset_tzinfo_rejected(self) -> None:
+        tz = _NoUtcoffsetTzInfo()
+        with pytest.raises(ValidationError, match="timezone-aware"):
+            PowerSignProfile(
+                plant_id="casabero",
+                canonical_field=CanonicalPowerField.FLOW_GRID,
+                source_system=SourceSystem.SOLARMAN_PLANT_FLOW,
+                authority_class=AuthorityClass.OPERATIONAL,
+                measurement_point="grid_meter",
+                unit="W",
+                positive_means=PowerDirection.GRID_IMPORT,
+                negative_means=PowerDirection.GRID_EXPORT,
+                status=ProfileStatus.CONFIRMED,
+                evidence_refs=("obs:tz-02",),
+                profile_version="1.0.0",
+                valid_from=_BASE_TS,
+                valid_to=datetime(2026, 8, 1, 12, 0, 0, tzinfo=tz),
+            )
+
+    def test_resolve_with_no_utcoffset_tzinfo_rejected(self) -> None:
+        reg = PowerSignProfileRegistry()
+        reg.register(_make_grid_confirmed())
+        tz = _NoUtcoffsetTzInfo()
+        with pytest.raises(ValueError, match="timezone-aware"):
+            reg.resolve(
+                plant_id="casabero",
+                canonical_field=CanonicalPowerField.FLOW_GRID,
+                source_system=SourceSystem.SOLARMAN_PLANT_FLOW,
+                timestamp=datetime(2026, 7, 21, 12, 0, 0, tzinfo=tz),
+            )

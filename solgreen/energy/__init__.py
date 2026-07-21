@@ -13,6 +13,7 @@ from solgreen.energy.sign_profiles import (
     SourceSystem,
     build_production_sign_profile_registry,
     is_power_field_source_compatible,
+    is_timezone_aware,
     validity_intervals_overlap,
 )
 
@@ -28,6 +29,7 @@ __all__ = [
     "SourceSystem",
     "build_production_sign_profile_registry",
     "is_power_field_source_compatible",
+    "is_timezone_aware",
     "normalize_power_value",
     "validity_intervals_overlap",
 ]

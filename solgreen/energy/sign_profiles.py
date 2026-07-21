@@ -130,6 +130,10 @@ def validity_intervals_overlap(
     return overlap
 
 
+def is_timezone_aware(value: datetime) -> bool:
+    return value.tzinfo is not None and value.utcoffset() is not None
+
+
 def _field_domain(field: CanonicalPowerField) -> str:
     if field in _GRID_FIELDS:
         return "grid"
@@ -175,10 +179,10 @@ class PowerSignProfile(BaseModel):
 
     @pydantic.model_validator(mode="after")
     def _validate_datetime_aware(self) -> PowerSignProfile:
-        if self.valid_from.tzinfo is None:
-            raise ValueError("valid_from must be timezone-aware")
-        if self.valid_to is not None and self.valid_to.tzinfo is None:
-            raise ValueError("valid_to must be timezone-aware")
+        if not is_timezone_aware(self.valid_from):
+            raise ValueError("valid_from must be timezone-aware (tzinfo and utcoffset both set)")
+        if self.valid_to is not None and not is_timezone_aware(self.valid_to):
+            raise ValueError("valid_to must be timezone-aware (tzinfo and utcoffset both set)")
         return self
 
     @pydantic.model_validator(mode="after")
@@ -364,7 +368,7 @@ class PowerSignProfileRegistry:
         source_system: SourceSystem,
         timestamp: datetime,
     ) -> PowerSignProfile | None:
-        if timestamp.tzinfo is None or timestamp.utcoffset() is None:
+        if not is_timezone_aware(timestamp):
             raise ValueError(f"resolve() requires timezone-aware timestamp, got naive: {timestamp}")
         candidates: list[PowerSignProfile] = []
         for profile in self._profiles:

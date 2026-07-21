@@ -16,6 +16,7 @@ from solgreen.energy.sign_profiles import (
     ProfileStatus,
     SourceSystem,
     is_power_field_source_compatible,
+    is_timezone_aware,
 )
 
 
@@ -49,6 +50,8 @@ class DirectionalPowerResult(BaseModel):
 
     @pydantic.model_validator(mode="after")
     def _validate_normalized_invariants(self) -> DirectionalPowerResult:
+        self._validate_authority_for_current_fields()
+        self._validate_field_source_internal()
         if self.status is NormalizationStatus.NORMALIZED:
             if self.raw_power_w is None:
                 raise ValueError("normalized result must have raw_power_w.")
@@ -72,22 +75,10 @@ class DirectionalPowerResult(BaseModel):
                         raise ValueError(f"{field_name} must be finite when populated.")
                     if val < 0:
                         raise ValueError(f"{field_name} must be non-negative when populated.")
-            if (
-                self.grid_import_w is not None
-                and self.grid_export_w is not None
-                and self.grid_import_w > 0
-                and self.grid_export_w > 0
-            ):
-                raise ValueError("grid_import_w and grid_export_w cannot both be > 0.")
-            if (
-                self.battery_charge_w is not None
-                and self.battery_discharge_w is not None
-                and self.battery_charge_w > 0
-                and self.battery_discharge_w > 0
-            ):
-                raise ValueError("battery_charge_w and battery_discharge_w cannot both be > 0.")
-            self._validate_domain_consistency()
+            self._validate_zero_explicit_magnitudes()
+            self._validate_magnitude_conservation()
         else:
+            self._validate_non_normalized_status_metadata()
             for field_name in (
                 "grid_import_w",
                 "grid_export_w",
@@ -104,7 +95,37 @@ class DirectionalPowerResult(BaseModel):
                     )
         return self
 
-    def _validate_domain_consistency(self) -> DirectionalPowerResult:
+    def _validate_authority_for_current_fields(self) -> None:
+        if self.authority_class is not AuthorityClass.OPERATIONAL:
+            raise ValueError(
+                f"DirectionalPowerResult for operational field "
+                f"'{self.canonical_field}' must use authority_class=operational, "
+                f"got '{self.authority_class}'. AuthorityClass.FISCAL is "
+                f"reserved for future fiscal-specific fields."
+            )
+
+    def _validate_field_source_internal(self) -> None:
+        compatible = is_power_field_source_compatible(self.canonical_field, self.source_system)
+        if self.status is NormalizationStatus.FIELD_MISMATCH:
+            if compatible:
+                raise ValueError(
+                    f"FIELD_MISMATCH status requires incompatible "
+                    f"field/source pair: got "
+                    f"field='{self.canonical_field}', "
+                    f"source='{self.source_system}' which are compatible."
+                )
+        elif compatible is False:
+            raise ValueError(
+                f"canonical_field '{self.canonical_field}' and source_system "
+                f"'{self.source_system}' are incompatible; status must be "
+                f"field_mismatch."
+            )
+
+    def _validate_zero_explicit_magnitudes(self) -> None:
+        if self.raw_power_w != 0.0:
+            return
+        raw = self.raw_power_w
+        assert raw is not None
         field = self.canonical_field
         grid_fields = {CanonicalPowerField.FLOW_GRID, CanonicalPowerField.TELEMETRY_GRID}
         battery_fields = {CanonicalPowerField.FLOW_BATTERY, CanonicalPowerField.TELEMETRY_BATTERY}
@@ -112,70 +133,199 @@ class DirectionalPowerResult(BaseModel):
         load_fields = {CanonicalPowerField.FLOW_CONSUMO}
 
         if field in grid_fields:
+            if self.grid_import_w != 0.0:
+                raise ValueError("zero grid result requires grid_import_w=0.0.")
+            if self.grid_export_w != 0.0:
+                raise ValueError("zero grid result requires grid_export_w=0.0.")
             if self.battery_charge_w is not None:
-                raise ValueError("grid result must not populate battery_charge_w.")
+                raise ValueError("zero grid result must not populate battery_charge_w.")
             if self.battery_discharge_w is not None:
-                raise ValueError("grid result must not populate battery_discharge_w.")
+                raise ValueError("zero grid result must not populate battery_discharge_w.")
             if self.pv_generation_w is not None:
-                raise ValueError("grid result must not populate pv_generation_w.")
+                raise ValueError("zero grid result must not populate pv_generation_w.")
             if self.load_consumption_w is not None:
-                raise ValueError("grid result must not populate load_consumption_w.")
-            if (
-                self.raw_power_w != 0.0
-                and self.grid_import_w is None
-                and self.grid_export_w is None
-            ):
-                raise ValueError(
-                    "normalized grid result must have at least one magnitude set for non-zero value."
-                )
+                raise ValueError("zero grid result must not populate load_consumption_w.")
         elif field in battery_fields:
+            if self.battery_charge_w != 0.0:
+                raise ValueError("zero battery result requires battery_charge_w=0.0.")
+            if self.battery_discharge_w != 0.0:
+                raise ValueError("zero battery result requires battery_discharge_w=0.0.")
             if self.grid_import_w is not None:
-                raise ValueError("battery result must not populate grid_import_w.")
+                raise ValueError("zero battery result must not populate grid_import_w.")
             if self.grid_export_w is not None:
-                raise ValueError("battery result must not populate grid_export_w.")
+                raise ValueError("zero battery result must not populate grid_export_w.")
             if self.pv_generation_w is not None:
-                raise ValueError("battery result must not populate pv_generation_w.")
+                raise ValueError("zero battery result must not populate pv_generation_w.")
             if self.load_consumption_w is not None:
-                raise ValueError("battery result must not populate load_consumption_w.")
-            if (
-                self.raw_power_w != 0.0
-                and self.battery_charge_w is None
-                and self.battery_discharge_w is None
+                raise ValueError("zero battery result must not populate load_consumption_w.")
+        elif field in pv_fields:
+            if self.pv_generation_w != 0.0:
+                raise ValueError("zero pv result requires pv_generation_w=0.0.")
+            if self.grid_import_w is not None:
+                raise ValueError("zero pv result must not populate grid_import_w.")
+            if self.grid_export_w is not None:
+                raise ValueError("zero pv result must not populate grid_export_w.")
+            if self.battery_charge_w is not None:
+                raise ValueError("zero pv result must not populate battery_charge_w.")
+            if self.battery_discharge_w is not None:
+                raise ValueError("zero pv result must not populate battery_discharge_w.")
+            if self.load_consumption_w is not None:
+                raise ValueError("zero pv result must not populate load_consumption_w.")
+        elif field in load_fields:
+            if self.load_consumption_w != 0.0:
+                raise ValueError("zero load result requires load_consumption_w=0.0.")
+            if self.grid_import_w is not None:
+                raise ValueError("zero load result must not populate grid_import_w.")
+            if self.grid_export_w is not None:
+                raise ValueError("zero load result must not populate grid_export_w.")
+            if self.battery_charge_w is not None:
+                raise ValueError("zero load result must not populate battery_charge_w.")
+            if self.battery_discharge_w is not None:
+                raise ValueError("zero load result must not populate battery_discharge_w.")
+            if self.pv_generation_w is not None:
+                raise ValueError("zero load result must not populate pv_generation_w.")
+
+    def _validate_magnitude_conservation(self) -> None:
+        raw = self.raw_power_w
+        if raw is None or raw == 0.0:
+            return
+        expected = abs(raw)
+        field = self.canonical_field
+        grid_fields = {CanonicalPowerField.FLOW_GRID, CanonicalPowerField.TELEMETRY_GRID}
+        battery_fields = {CanonicalPowerField.FLOW_BATTERY, CanonicalPowerField.TELEMETRY_BATTERY}
+        pv_fields = {CanonicalPowerField.FLOW_PRODUCCION, CanonicalPowerField.TELEMETRY_PV}
+        load_fields = {CanonicalPowerField.FLOW_CONSUMO}
+
+        if field in grid_fields:
+            self._validate_signed_pair(
+                primary=self.grid_import_w,
+                other=self.grid_export_w,
+                expected=expected,
+                primary_label="grid_import_w",
+                other_label="grid_export_w",
+            )
+            self._assert_other_fields_none(
+                "grid",
+                (
+                    "battery_charge_w",
+                    "battery_discharge_w",
+                    "pv_generation_w",
+                    "load_consumption_w",
+                ),
+            )
+        elif field in battery_fields:
+            self._validate_signed_pair(
+                primary=self.battery_charge_w,
+                other=self.battery_discharge_w,
+                expected=expected,
+                primary_label="battery_charge_w",
+                other_label="battery_discharge_w",
+            )
+            self._assert_other_fields_none(
+                "battery",
+                (
+                    "grid_import_w",
+                    "grid_export_w",
+                    "pv_generation_w",
+                    "load_consumption_w",
+                ),
+            )
+        elif field in pv_fields:
+            if raw <= 0:
+                raise ValueError(f"normalized pv result must have raw_power_w > 0, got {raw}.")
+            if self.pv_generation_w != raw:
+                raise ValueError(
+                    f"pv_generation_w ({self.pv_generation_w}) must equal raw_power_w ({raw})."
+                )
+            self._assert_other_fields_none(
+                "pv_generation_w",
+                (
+                    "grid_import_w",
+                    "grid_export_w",
+                    "battery_charge_w",
+                    "battery_discharge_w",
+                    "load_consumption_w",
+                ),
+            )
+        elif field in load_fields:
+            if raw <= 0:
+                raise ValueError(f"normalized load result must have raw_power_w > 0, got {raw}.")
+            if self.load_consumption_w != raw:
+                raise ValueError(
+                    f"load_consumption_w ({self.load_consumption_w}) must equal "
+                    f"raw_power_w ({raw})."
+                )
+            self._assert_other_fields_none(
+                "load_consumption_w",
+                (
+                    "grid_import_w",
+                    "grid_export_w",
+                    "battery_charge_w",
+                    "battery_discharge_w",
+                    "pv_generation_w",
+                ),
+            )
+
+    def _validate_signed_pair(
+        self,
+        *,
+        primary: float | None,
+        other: float | None,
+        expected: float,
+        primary_label: str,
+        other_label: str,
+    ) -> None:
+        if primary is not None and other is not None:
+            raise ValueError(f"{primary_label} and {other_label} cannot both be populated.")
+        if primary is not None:
+            if primary != expected:
+                raise ValueError(
+                    f"{primary_label} ({primary}) must equal abs(raw_power_w) ({expected})."
+                )
+        elif other is not None:
+            if other != expected:
+                raise ValueError(
+                    f"{other_label} ({other}) must equal abs(raw_power_w) ({expected})."
+                )
+        else:
+            raise ValueError(
+                f"normalized signed result must populate either "
+                f"{primary_label} or {other_label} for non-zero value."
+            )
+
+    def _assert_other_fields_none(self, populated: str, others: tuple[str, ...]) -> None:
+        for field_name in others:
+            if getattr(self, field_name) is not None:
+                raise ValueError(f"{populated} populated; {field_name} must be None.")
+
+    def _validate_non_normalized_status_metadata(self) -> None:
+        status = self.status
+        if status is NormalizationStatus.PROFILE_NOT_FOUND:
+            if self.profile_version is not None:
+                raise ValueError("profile_not_found result must have profile_version=None.")
+            if self.profile_status is not None:
+                raise ValueError("profile_not_found result must have profile_status=None.")
+        elif status is NormalizationStatus.MISSING_VALUE:
+            if self.raw_power_w is not None:
+                raise ValueError("missing_value result must have raw_power_w=None.")
+        elif status is NormalizationStatus.NONFINITE_VALUE:
+            if self.raw_power_w is None or math.isfinite(self.raw_power_w):
+                raise ValueError("nonfinite_value result must have non-finite raw_power_w.")
+        elif status is NormalizationStatus.INVALID_UNSIGNED_NEGATIVE:
+            if self.raw_power_w is None or self.raw_power_w >= 0:
+                raise ValueError("invalid_unsigned_negative result must have raw_power_w < 0.")
+        elif status is NormalizationStatus.PROFILE_NOT_CONFIRMED:
+            if self.profile_version is None:
+                raise ValueError("profile_not_confirmed result must have profile_version set.")
+            if self.profile_status not in (
+                ProfileStatus.PROVISIONAL,
+                ProfileStatus.UNKNOWN,
             ):
                 raise ValueError(
-                    "normalized battery result must have at least one magnitude set for non-zero value."
+                    "profile_not_confirmed result must have profile_status=provisional or unknown."
                 )
-        elif field in pv_fields:
-            if self.grid_import_w is not None:
-                raise ValueError("pv result must not populate grid_import_w.")
-            if self.grid_export_w is not None:
-                raise ValueError("pv result must not populate grid_export_w.")
-            if self.battery_charge_w is not None:
-                raise ValueError("pv result must not populate battery_charge_w.")
-            if self.battery_discharge_w is not None:
-                raise ValueError("pv result must not populate battery_discharge_w.")
-            if self.load_consumption_w is not None:
-                raise ValueError("pv result must not populate load_consumption_w.")
-            if self.pv_generation_w is None and self.raw_power_w != 0.0:
-                raise ValueError(
-                    "normalized pv result must have pv_generation_w set for non-zero value."
-                )
-        elif field in load_fields:
-            if self.grid_import_w is not None:
-                raise ValueError("load result must not populate grid_import_w.")
-            if self.grid_export_w is not None:
-                raise ValueError("load result must not populate grid_export_w.")
-            if self.battery_charge_w is not None:
-                raise ValueError("load result must not populate battery_charge_w.")
-            if self.battery_discharge_w is not None:
-                raise ValueError("load result must not populate battery_discharge_w.")
-            if self.pv_generation_w is not None:
-                raise ValueError("load result must not populate pv_generation_w.")
-            if self.load_consumption_w is None and self.raw_power_w != 0.0:
-                raise ValueError(
-                    "normalized load result must have load_consumption_w set for non-zero value."
-                )
-        return self
+            if self.raw_power_w is None:
+                raise ValueError("profile_not_confirmed result must have raw_power_w set.")
 
 
 def normalize_power_value(
@@ -194,6 +344,11 @@ def normalize_power_value(
             authority_class=AuthorityClass.OPERATIONAL,
             raw_power_w=raw_power_w,
             status=NormalizationStatus.FIELD_MISMATCH,
+        )
+
+    if not is_timezone_aware(timestamp):
+        raise ValueError(
+            f"normalize_power_value() requires timezone-aware timestamp, got naive: {timestamp}"
         )
 
     if raw_power_w is None:

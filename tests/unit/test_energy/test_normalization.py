@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import math
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta, tzinfo
 
 import pytest
 
@@ -547,7 +547,7 @@ class TestNormalizationPrecedence:
 
 class TestDirectionalPowerResultDomainInvariants:
     def test_grid_result_with_battery_field_rejected(self) -> None:
-        with pytest.raises(ValueError, match="grid result must not populate battery"):
+        with pytest.raises(ValueError, match="battery_charge_w must be None"):
             DirectionalPowerResult(
                 canonical_field=CanonicalPowerField.FLOW_GRID,
                 source_system=SourceSystem.SOLARMAN_PLANT_FLOW,
@@ -561,7 +561,7 @@ class TestDirectionalPowerResultDomainInvariants:
             )
 
     def test_grid_result_with_pv_field_rejected(self) -> None:
-        with pytest.raises(ValueError, match="grid result must not populate pv"):
+        with pytest.raises(ValueError, match="pv_generation_w must be None"):
             DirectionalPowerResult(
                 canonical_field=CanonicalPowerField.FLOW_GRID,
                 source_system=SourceSystem.SOLARMAN_PLANT_FLOW,
@@ -575,7 +575,7 @@ class TestDirectionalPowerResultDomainInvariants:
             )
 
     def test_battery_result_with_grid_field_rejected(self) -> None:
-        with pytest.raises(ValueError, match="battery result must not populate grid"):
+        with pytest.raises(ValueError, match="grid_import_w must be None"):
             DirectionalPowerResult(
                 canonical_field=CanonicalPowerField.FLOW_BATTERY,
                 source_system=SourceSystem.SOLARMAN_PLANT_FLOW,
@@ -589,7 +589,7 @@ class TestDirectionalPowerResultDomainInvariants:
             )
 
     def test_pv_result_with_load_field_rejected(self) -> None:
-        with pytest.raises(ValueError, match="pv result must not populate load"):
+        with pytest.raises(ValueError, match="load_consumption_w must be None"):
             DirectionalPowerResult(
                 canonical_field=CanonicalPowerField.TELEMETRY_PV,
                 source_system=SourceSystem.INVERTER_TELEMETRY,
@@ -603,7 +603,7 @@ class TestDirectionalPowerResultDomainInvariants:
             )
 
     def test_load_result_with_pv_field_rejected(self) -> None:
-        with pytest.raises(ValueError, match="load result must not populate pv"):
+        with pytest.raises(ValueError, match="pv_generation_w must be None"):
             DirectionalPowerResult(
                 canonical_field=CanonicalPowerField.FLOW_CONSUMO,
                 source_system=SourceSystem.SOLARMAN_PLANT_FLOW,
@@ -617,7 +617,7 @@ class TestDirectionalPowerResultDomainInvariants:
             )
 
     def test_normalized_result_without_domain_magnitude_rejected(self) -> None:
-        with pytest.raises(ValueError, match="must have at least one magnitude set"):
+        with pytest.raises(ValueError, match="must populate either grid_import_w or grid_export_w"):
             DirectionalPowerResult(
                 canonical_field=CanonicalPowerField.FLOW_GRID,
                 source_system=SourceSystem.SOLARMAN_PLANT_FLOW,
@@ -683,3 +683,375 @@ class TestDirectionalPowerResultDomainInvariants:
             load_consumption_w=0.0,
         )
         assert result.load_consumption_w == 0.0
+
+
+class _NoUtcoffsetTzInfo(tzinfo):
+    """Synthetic tzinfo that exists but utcoffset() returns None."""
+
+    def utcoffset(self, dt: datetime | None) -> timedelta | None:
+        return None
+
+    def dst(self, dt: datetime | None) -> timedelta | None:
+        return None
+
+    def tzname(self, dt: datetime | None) -> str:
+        return "no-utcoffset"
+
+
+class TestNormalizeTimestampAware:
+    def test_normalize_naive_timestamp_rejected(self) -> None:
+        reg = PowerSignProfileRegistry()
+        naive_ts = datetime(2026, 7, 21, 12, 0, 0)
+        with pytest.raises(ValueError, match="timezone-aware"):
+            normalize_power_value(
+                plant_id="casabero",
+                canonical_field=CanonicalPowerField.FLOW_GRID,
+                source_system=SourceSystem.SOLARMAN_PLANT_FLOW,
+                timestamp=naive_ts,
+                raw_power_w=100.0,
+                registry=reg,
+            )
+
+    def test_normalize_no_utcoffset_tzinfo_rejected(self) -> None:
+        reg = PowerSignProfileRegistry()
+        tz = _NoUtcoffsetTzInfo()
+        with pytest.raises(ValueError, match="timezone-aware"):
+            normalize_power_value(
+                plant_id="casabero",
+                canonical_field=CanonicalPowerField.FLOW_GRID,
+                source_system=SourceSystem.SOLARMAN_PLANT_FLOW,
+                timestamp=datetime(2026, 7, 21, 12, 0, 0, tzinfo=tz),
+                raw_power_w=100.0,
+                registry=reg,
+            )
+
+    def test_field_mismatch_keeps_precedence_over_naive_timestamp(self) -> None:
+        reg = PowerSignProfileRegistry()
+        naive_ts = datetime(2026, 7, 21, 12, 0, 0)
+        result = normalize_power_value(
+            plant_id="casabero",
+            canonical_field=CanonicalPowerField.FLOW_GRID,
+            source_system=SourceSystem.INVERTER_TELEMETRY,
+            timestamp=naive_ts,
+            raw_power_w=100.0,
+            registry=reg,
+        )
+        assert result.status is NormalizationStatus.FIELD_MISMATCH
+
+
+class TestDirectionalPowerResultAuthorityAndSource:
+    def test_normalized_grid_fiscal_authority_rejected(self) -> None:
+        with pytest.raises(ValueError, match="authority_class=operational"):
+            DirectionalPowerResult(
+                canonical_field=CanonicalPowerField.FLOW_GRID,
+                source_system=SourceSystem.SOLARMAN_PLANT_FLOW,
+                authority_class=AuthorityClass.FISCAL,
+                raw_power_w=100.0,
+                status=NormalizationStatus.NORMALIZED,
+                profile_version="1.0.0",
+                profile_status=ProfileStatus.CONFIRMED,
+                grid_import_w=100.0,
+            )
+
+    def test_profile_not_found_fiscal_authority_rejected(self) -> None:
+        with pytest.raises(ValueError, match="authority_class=operational"):
+            DirectionalPowerResult(
+                canonical_field=CanonicalPowerField.FLOW_GRID,
+                source_system=SourceSystem.SOLARMAN_PLANT_FLOW,
+                authority_class=AuthorityClass.FISCAL,
+                raw_power_w=100.0,
+                status=NormalizationStatus.PROFILE_NOT_FOUND,
+            )
+
+    def test_field_mismatch_fiscal_authority_rejected(self) -> None:
+        with pytest.raises(ValueError, match="authority_class=operational"):
+            DirectionalPowerResult(
+                canonical_field=CanonicalPowerField.FLOW_GRID,
+                source_system=SourceSystem.INVERTER_TELEMETRY,
+                authority_class=AuthorityClass.FISCAL,
+                raw_power_w=100.0,
+                status=NormalizationStatus.FIELD_MISMATCH,
+            )
+
+    def test_normalized_field_source_mismatch_rejected(self) -> None:
+        with pytest.raises(ValueError, match="incompatible"):
+            DirectionalPowerResult(
+                canonical_field=CanonicalPowerField.FLOW_GRID,
+                source_system=SourceSystem.INVERTER_TELEMETRY,
+                authority_class=AuthorityClass.OPERATIONAL,
+                raw_power_w=100.0,
+                status=NormalizationStatus.NORMALIZED,
+                profile_version="1.0.0",
+                profile_status=ProfileStatus.CONFIRMED,
+                grid_import_w=100.0,
+            )
+
+    def test_missing_field_source_mismatch_rejected(self) -> None:
+        with pytest.raises(ValueError, match="incompatible"):
+            DirectionalPowerResult(
+                canonical_field=CanonicalPowerField.FLOW_GRID,
+                source_system=SourceSystem.INVERTER_TELEMETRY,
+                authority_class=AuthorityClass.OPERATIONAL,
+                raw_power_w=None,
+                status=NormalizationStatus.MISSING_VALUE,
+            )
+
+    def test_field_mismatch_on_compatible_pair_rejected(self) -> None:
+        with pytest.raises(ValueError, match="FIELD_MISMATCH status requires"):
+            DirectionalPowerResult(
+                canonical_field=CanonicalPowerField.FLOW_GRID,
+                source_system=SourceSystem.SOLARMAN_PLANT_FLOW,
+                authority_class=AuthorityClass.OPERATIONAL,
+                raw_power_w=100.0,
+                status=NormalizationStatus.FIELD_MISMATCH,
+            )
+
+    def test_field_mismatch_real_accepted(self) -> None:
+        result = DirectionalPowerResult(
+            canonical_field=CanonicalPowerField.FLOW_GRID,
+            source_system=SourceSystem.INVERTER_TELEMETRY,
+            authority_class=AuthorityClass.OPERATIONAL,
+            raw_power_w=100.0,
+            status=NormalizationStatus.FIELD_MISMATCH,
+        )
+        assert result.status is NormalizationStatus.FIELD_MISMATCH
+
+
+class TestDirectionalPowerResultZeroInvariants:
+    def test_grid_zero_without_magnitudes_rejected(self) -> None:
+        with pytest.raises(ValueError, match=r"zero grid result requires grid_import_w=0.0"):
+            DirectionalPowerResult(
+                canonical_field=CanonicalPowerField.FLOW_GRID,
+                source_system=SourceSystem.SOLARMAN_PLANT_FLOW,
+                authority_class=AuthorityClass.OPERATIONAL,
+                raw_power_w=0.0,
+                status=NormalizationStatus.NORMALIZED,
+                profile_version="1.0.0",
+                profile_status=ProfileStatus.CONFIRMED,
+                grid_import_w=None,
+                grid_export_w=0.0,
+            )
+
+    def test_grid_zero_with_only_one_magnitude_rejected(self) -> None:
+        with pytest.raises(ValueError, match=r"zero grid result requires grid_export_w=0.0"):
+            DirectionalPowerResult(
+                canonical_field=CanonicalPowerField.FLOW_GRID,
+                source_system=SourceSystem.SOLARMAN_PLANT_FLOW,
+                authority_class=AuthorityClass.OPERATIONAL,
+                raw_power_w=0.0,
+                status=NormalizationStatus.NORMALIZED,
+                profile_version="1.0.0",
+                profile_status=ProfileStatus.CONFIRMED,
+                grid_import_w=0.0,
+                grid_export_w=None,
+            )
+
+    def test_battery_zero_without_magnitudes_rejected(self) -> None:
+        with pytest.raises(ValueError, match=r"zero battery result requires battery_charge_w=0.0"):
+            DirectionalPowerResult(
+                canonical_field=CanonicalPowerField.FLOW_BATTERY,
+                source_system=SourceSystem.SOLARMAN_PLANT_FLOW,
+                authority_class=AuthorityClass.OPERATIONAL,
+                raw_power_w=0.0,
+                status=NormalizationStatus.NORMALIZED,
+                profile_version="1.0.0",
+                profile_status=ProfileStatus.CONFIRMED,
+                battery_charge_w=None,
+                battery_discharge_w=0.0,
+            )
+
+    def test_pv_zero_without_magnitude_rejected(self) -> None:
+        with pytest.raises(ValueError, match=r"zero pv result requires pv_generation_w=0.0"):
+            DirectionalPowerResult(
+                canonical_field=CanonicalPowerField.TELEMETRY_PV,
+                source_system=SourceSystem.INVERTER_TELEMETRY,
+                authority_class=AuthorityClass.OPERATIONAL,
+                raw_power_w=0.0,
+                status=NormalizationStatus.NORMALIZED,
+                profile_version="1.0.0",
+                profile_status=ProfileStatus.CONFIRMED,
+                pv_generation_w=None,
+            )
+
+    def test_load_zero_without_magnitude_rejected(self) -> None:
+        with pytest.raises(ValueError, match=r"zero load result requires load_consumption_w=0.0"):
+            DirectionalPowerResult(
+                canonical_field=CanonicalPowerField.FLOW_CONSUMO,
+                source_system=SourceSystem.SOLARMAN_PLANT_FLOW,
+                authority_class=AuthorityClass.OPERATIONAL,
+                raw_power_w=0.0,
+                status=NormalizationStatus.NORMALIZED,
+                profile_version="1.0.0",
+                profile_status=ProfileStatus.CONFIRMED,
+                load_consumption_w=None,
+            )
+
+    def test_four_valid_zeros_accepted(self) -> None:
+        for field, source, kwargs in [
+            (
+                CanonicalPowerField.FLOW_GRID,
+                SourceSystem.SOLARMAN_PLANT_FLOW,
+                {"grid_import_w": 0.0, "grid_export_w": 0.0},
+            ),
+            (
+                CanonicalPowerField.FLOW_BATTERY,
+                SourceSystem.SOLARMAN_PLANT_FLOW,
+                {"battery_charge_w": 0.0, "battery_discharge_w": 0.0},
+            ),
+            (
+                CanonicalPowerField.TELEMETRY_PV,
+                SourceSystem.INVERTER_TELEMETRY,
+                {"pv_generation_w": 0.0},
+            ),
+            (
+                CanonicalPowerField.FLOW_CONSUMO,
+                SourceSystem.SOLARMAN_PLANT_FLOW,
+                {"load_consumption_w": 0.0},
+            ),
+        ]:
+            result = DirectionalPowerResult(
+                canonical_field=field,
+                source_system=source,
+                authority_class=AuthorityClass.OPERATIONAL,
+                raw_power_w=0.0,
+                status=NormalizationStatus.NORMALIZED,
+                profile_version="1.0.0",
+                profile_status=ProfileStatus.CONFIRMED,
+                **kwargs,
+            )
+            assert result.status is NormalizationStatus.NORMALIZED
+
+
+class TestDirectionalPowerResultMagnitudeConservation:
+    def test_grid_magnitude_different_from_raw_rejected(self) -> None:
+        with pytest.raises(ValueError, match="must equal abs"):
+            DirectionalPowerResult(
+                canonical_field=CanonicalPowerField.FLOW_GRID,
+                source_system=SourceSystem.SOLARMAN_PLANT_FLOW,
+                authority_class=AuthorityClass.OPERATIONAL,
+                raw_power_w=100.0,
+                status=NormalizationStatus.NORMALIZED,
+                profile_version="1.0.0",
+                profile_status=ProfileStatus.CONFIRMED,
+                grid_import_w=1.0,
+            )
+
+    def test_grid_nonzero_with_both_magnitudes_rejected(self) -> None:
+        with pytest.raises(ValueError, match="cannot both be populated"):
+            DirectionalPowerResult(
+                canonical_field=CanonicalPowerField.FLOW_GRID,
+                source_system=SourceSystem.SOLARMAN_PLANT_FLOW,
+                authority_class=AuthorityClass.OPERATIONAL,
+                raw_power_w=100.0,
+                status=NormalizationStatus.NORMALIZED,
+                profile_version="1.0.0",
+                profile_status=ProfileStatus.CONFIRMED,
+                grid_import_w=100.0,
+                grid_export_w=100.0,
+            )
+
+    def test_battery_magnitude_different_rejected(self) -> None:
+        with pytest.raises(ValueError, match="must equal abs"):
+            DirectionalPowerResult(
+                canonical_field=CanonicalPowerField.FLOW_BATTERY,
+                source_system=SourceSystem.SOLARMAN_PLANT_FLOW,
+                authority_class=AuthorityClass.OPERATIONAL,
+                raw_power_w=-500.0,
+                status=NormalizationStatus.NORMALIZED,
+                profile_version="1.0.0",
+                profile_status=ProfileStatus.CONFIRMED,
+                battery_charge_w=499.0,
+            )
+
+    def test_pv_magnitude_different_rejected(self) -> None:
+        with pytest.raises(ValueError, match="must equal raw_power_w"):
+            DirectionalPowerResult(
+                canonical_field=CanonicalPowerField.TELEMETRY_PV,
+                source_system=SourceSystem.INVERTER_TELEMETRY,
+                authority_class=AuthorityClass.OPERATIONAL,
+                raw_power_w=700.0,
+                status=NormalizationStatus.NORMALIZED,
+                profile_version="1.0.0",
+                profile_status=ProfileStatus.CONFIRMED,
+                pv_generation_w=701.0,
+            )
+
+    def test_load_magnitude_different_rejected(self) -> None:
+        with pytest.raises(ValueError, match="must equal raw_power_w"):
+            DirectionalPowerResult(
+                canonical_field=CanonicalPowerField.FLOW_CONSUMO,
+                source_system=SourceSystem.SOLARMAN_PLANT_FLOW,
+                authority_class=AuthorityClass.OPERATIONAL,
+                raw_power_w=800.0,
+                status=NormalizationStatus.NORMALIZED,
+                profile_version="1.0.0",
+                profile_status=ProfileStatus.CONFIRMED,
+                load_consumption_w=799.0,
+            )
+
+    def test_normalize_results_pass_invariants(self) -> None:
+        reg = PowerSignProfileRegistry()
+        reg.register(_grid_profile())
+        result = _normalize(
+            CanonicalPowerField.FLOW_GRID,
+            SourceSystem.SOLARMAN_PLANT_FLOW,
+            100.0,
+            reg,
+        )
+        assert result.status is NormalizationStatus.NORMALIZED
+        assert result.grid_import_w == 100.0
+
+
+class TestDirectionalPowerResultStatusInvariants:
+    def test_profile_not_found_with_profile_version_rejected(self) -> None:
+        with pytest.raises(ValueError, match=r"profile_not_found.*profile_version=None"):
+            DirectionalPowerResult(
+                canonical_field=CanonicalPowerField.FLOW_GRID,
+                source_system=SourceSystem.SOLARMAN_PLANT_FLOW,
+                authority_class=AuthorityClass.OPERATIONAL,
+                raw_power_w=100.0,
+                status=NormalizationStatus.PROFILE_NOT_FOUND,
+                profile_version="1.0.0",
+            )
+
+    def test_missing_value_with_raw_rejected(self) -> None:
+        with pytest.raises(ValueError, match=r"missing_value.*raw_power_w=None"):
+            DirectionalPowerResult(
+                canonical_field=CanonicalPowerField.FLOW_GRID,
+                source_system=SourceSystem.SOLARMAN_PLANT_FLOW,
+                authority_class=AuthorityClass.OPERATIONAL,
+                raw_power_w=100.0,
+                status=NormalizationStatus.MISSING_VALUE,
+            )
+
+    def test_nonfinite_value_with_finite_raw_rejected(self) -> None:
+        with pytest.raises(ValueError, match="nonfinite_value"):
+            DirectionalPowerResult(
+                canonical_field=CanonicalPowerField.FLOW_GRID,
+                source_system=SourceSystem.SOLARMAN_PLANT_FLOW,
+                authority_class=AuthorityClass.OPERATIONAL,
+                raw_power_w=100.0,
+                status=NormalizationStatus.NONFINITE_VALUE,
+            )
+
+    def test_invalid_unsigned_negative_with_positive_raw_rejected(self) -> None:
+        with pytest.raises(ValueError, match=r"invalid_unsigned_negative.*raw_power_w < 0"):
+            DirectionalPowerResult(
+                canonical_field=CanonicalPowerField.TELEMETRY_PV,
+                source_system=SourceSystem.INVERTER_TELEMETRY,
+                authority_class=AuthorityClass.OPERATIONAL,
+                raw_power_w=100.0,
+                status=NormalizationStatus.INVALID_UNSIGNED_NEGATIVE,
+                profile_version="1.0.0",
+                profile_status=ProfileStatus.CONFIRMED,
+            )
+
+    def test_profile_not_confirmed_without_metadata_rejected(self) -> None:
+        with pytest.raises(ValueError, match="profile_not_confirmed"):
+            DirectionalPowerResult(
+                canonical_field=CanonicalPowerField.FLOW_GRID,
+                source_system=SourceSystem.SOLARMAN_PLANT_FLOW,
+                authority_class=AuthorityClass.OPERATIONAL,
+                raw_power_w=100.0,
+                status=NormalizationStatus.PROFILE_NOT_CONFIRMED,
+            )
