@@ -40,6 +40,7 @@ from solgreen.importer.reporter import (
 )
 from solgreen.quality import analyze_plant_flow, analyze_telemetry
 from solgreen.timeline import CanonicalSample, join_by_tolerance
+from solgreen.timeline.duration import parse_iso_duration
 from solgreen.timeline.episode import CanonicalEpisode, build_episodes
 
 app = typer.Typer(add_completion=False, help="Solgreen CLI", no_args_is_help=True)
@@ -70,9 +71,7 @@ def _build_llm_provider(
     if provider_name is None or provider_name == "none":
         return None
     if api_key is None:
-        raise typer.BadParameter(
-            f"--llm-api-key required for provider '{provider_name}'"
-        )
+        raise typer.BadParameter(f"--llm-api-key required for provider '{provider_name}'")
 
     from solgreen.diagnostics.llm_provider import FallbackProvider
 
@@ -133,18 +132,16 @@ def _parse_single_file(
     if source_type == SourceType.SOLARMAN_PLANT_FLOW:
         flow_samples: list[PlantFlowSample] = parse_plant_flow(file)
         quality_result = analyze_plant_flow(flow_samples, source_type)
-        summary = summarize_flow(
-            flow_samples, PLANT_FLOW_COLUMNS, quality_result=quality_result
-        )
+        summary = summarize_flow(flow_samples, PLANT_FLOW_COLUMNS, quality_result=quality_result)
         parser_id = f"solarman_flow_{file.suffix.lstrip('.').lower()}"
         batch = build_import_batch(file, source_type, parser_id, plant_id)
-        batch = batch.model_copy(
-            update={"status": ImportStatus.PARSED, "quality_summary": summary}
-        )
+        batch = batch.model_copy(update={"status": ImportStatus.PARSED, "quality_summary": summary})
         if repo is not None:
             repo.save_import_batch(batch)
         validity = _validity_summary(flow_samples)
-        return _ParsedFile(samples=flow_samples, source_type=source_type, batch=batch, validity=validity)
+        return _ParsedFile(
+            samples=flow_samples, source_type=source_type, batch=batch, validity=validity
+        )
 
     elif source_type == SourceType.SOLARMAN_INVERTER_TELEMETRY:
         tel_samples: list[InverterTelemetrySample] = parse_inverter_telemetry(file)
@@ -156,13 +153,13 @@ def _parse_single_file(
         )
         parser_id = f"solarman_telemetry_{file.suffix.lstrip('.').lower()}"
         batch = build_import_batch(file, source_type, parser_id, plant_id)
-        batch = batch.model_copy(
-            update={"status": ImportStatus.PARSED, "quality_summary": summary}
-        )
+        batch = batch.model_copy(update={"status": ImportStatus.PARSED, "quality_summary": summary})
         if repo is not None:
             repo.save_import_batch(batch)
         validity = _validity_summary(tel_samples)
-        return _ParsedFile(samples=tel_samples, source_type=source_type, batch=batch, validity=validity)
+        return _ParsedFile(
+            samples=tel_samples, source_type=source_type, batch=batch, validity=validity
+        )
 
     else:
         raise typer.BadParameter(f"Unsupported source type: {source_type}")
@@ -312,7 +309,10 @@ def _import_with_align(
 ) -> None:
     tol: timedelta
     if tolerance_str is not None:
-        tol = timedelta(seconds=_parse_iso_duration(tolerance_str))
+        try:
+            tol = parse_iso_duration(tolerance_str)
+        except ValueError as exc:
+            raise typer.BadParameter(f"Invalid --tolerance value {tolerance_str!r}: {exc}") from exc
     else:
         tol = timedelta(minutes=2, seconds=30)
 
@@ -438,13 +438,6 @@ def _run_llm_interpretation(
         typer.echo(f"    LLM: {interpretation.summary[:80]}...")
     except Exception as exc:
         typer.echo(f"    LLM error: {exc}")
-
-
-def _parse_iso_duration(iso: str) -> float:
-    from dateutil.parser import isoparser
-
-    td: timedelta = isoparser().parse_timedelta(iso)
-    return td.total_seconds()
 
 
 @app.command("deploy-schema")
