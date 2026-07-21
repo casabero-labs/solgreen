@@ -100,7 +100,10 @@ class PlausibilityResult(BaseModel):
     evaluated_count: int = Field(
         default=0,
         ge=0,
-        description="Numero de (sample, signal) evaluados bajo un rango explicito.",
+        description=(
+            "Number of sample-signal observations receiving a definitive "
+            "universal or profile-backed plausibility evaluation."
+        ),
     )
     passed_count: int = Field(default=0, ge=0, description="Numero de evaluaciones aprobadas.")
     failed_count: int = Field(
@@ -123,3 +126,30 @@ class PlausibilityResult(BaseModel):
         le=1.0,
         description="passed_count / evaluated_count. None si evaluated_count == 0.",
     )
+
+    @pydantic.model_validator(mode="after")
+    def _check_invariants(self) -> PlausibilityResult:
+        if self.evaluated_count != self.passed_count + self.failed_count:
+            raise ValueError(
+                "PlausibilityResult invariant violated: evaluated_count "
+                f"({self.evaluated_count}) != passed_count ({self.passed_count}) "
+                f"+ failed_count ({self.failed_count})."
+            )
+        if self.evaluated_count == 0 and self.score is not None:
+            raise ValueError(
+                "PlausibilityResult invariant violated: evaluated_count == 0 "
+                f"but score is {self.score} (must be None)."
+            )
+        if self.evaluated_count > 0 and self.score is None:
+            raise ValueError(
+                "PlausibilityResult invariant violated: evaluated_count > 0 "
+                f"({self.evaluated_count}) but score is None."
+            )
+        if self.evaluated_count > 0 and self.score is not None:
+            expected = self.passed_count / self.evaluated_count
+            if abs(self.score - expected) > 1e-9:
+                raise ValueError(
+                    f"PlausibilityResult invariant violated: score ({self.score}) "
+                    f"!= passed_count / evaluated_count ({expected})."
+                )
+        return self

@@ -116,7 +116,20 @@ def _evaluate_signal(
     source_type: SourceType,
     profile: MeasurementPlausibilityProfile | None,
 ) -> tuple[list[PlausibilityFinding], bool, bool]:
-    """Returns (findings, evaluated, has_finding)."""
+    """Return (findings, evaluated, has_finding).
+
+    evaluated=True means this (sample, signal) received a definitive
+    universal or profile-backed plausibility check (passed or failed).
+
+    Per signal, only ONE definitive check applies, in this order:
+      1. Non-finite (always; halts further checks).
+      2. SOC universal range [0, 100] (always for soc_pct).
+      3. SOC profile range (only if profile has a range for soc_pct).
+      4. Temperature absolute zero (always for temperature signals).
+      5. Temperature profile range (only if profile has a range for it).
+      6. Generic profile range (only if profile has a range for signal).
+      7. Nothing configured -> not_configured, not evaluated.
+    """
     findings: list[PlausibilityFinding] = []
 
     if not _is_finite_number(value):
@@ -134,41 +147,47 @@ def _evaluate_signal(
                 range_=None,
             )
         )
-        return findings, False, True
-
-    if signal_name == SOC_PCT_CANONICAL and (value < 0.0 or value > 100.0):
-        findings.append(
-            _make_finding(
-                check_id=CHECK_ID_SOC_RANGE,
-                signal_name=signal_name,
-                value=value,
-                timestamp_utc=timestamp_utc,
-                source_type=source_type,
-                reason_code=PlausibilityReasonCode.SOC_OUT_OF_RANGE,
-                minimum=0.0,
-                maximum=100.0,
-                unit="%",
-                range_=None,
-            )
-        )
         return findings, True, True
 
-    if _is_temperature_signal(signal_name) and value < ABSOLUTE_ZERO_C:
-        findings.append(
-            _make_finding(
-                check_id=CHECK_ID_ABS_ZERO,
-                signal_name=signal_name,
-                value=value,
-                timestamp_utc=timestamp_utc,
-                source_type=source_type,
-                reason_code=PlausibilityReasonCode.BELOW_ABSOLUTE_ZERO,
-                minimum=ABSOLUTE_ZERO_C,
-                maximum=None,
-                unit="C",
-                range_=None,
+    if signal_name == SOC_PCT_CANONICAL:
+        if value < 0.0 or value > 100.0:
+            findings.append(
+                _make_finding(
+                    check_id=CHECK_ID_SOC_RANGE,
+                    signal_name=signal_name,
+                    value=value,
+                    timestamp_utc=timestamp_utc,
+                    source_type=source_type,
+                    reason_code=PlausibilityReasonCode.SOC_OUT_OF_RANGE,
+                    minimum=0.0,
+                    maximum=100.0,
+                    unit="%",
+                    range_=None,
+                )
             )
-        )
-        return findings, True, True
+            return findings, True, True
+        if profile is None or signal_name not in profile.ranges:
+            return findings, True, False
+
+    if _is_temperature_signal(signal_name):
+        if value < ABSOLUTE_ZERO_C:
+            findings.append(
+                _make_finding(
+                    check_id=CHECK_ID_ABS_ZERO,
+                    signal_name=signal_name,
+                    value=value,
+                    timestamp_utc=timestamp_utc,
+                    source_type=source_type,
+                    reason_code=PlausibilityReasonCode.BELOW_ABSOLUTE_ZERO,
+                    minimum=ABSOLUTE_ZERO_C,
+                    maximum=None,
+                    unit="C",
+                    range_=None,
+                )
+            )
+            return findings, True, True
+        if profile is None or signal_name not in profile.ranges:
+            return findings, False, False
 
     if profile is not None and signal_name in profile.ranges:
         range_ = profile.ranges[signal_name]

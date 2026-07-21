@@ -16,26 +16,27 @@ from solgreen.quality.plausibility import (
 from solgreen.quality.score import aggregate_quality_score, compute_temporal_dimensions
 
 
-def _apply_plausibility(
+def _apply_telemetry_plausibility(
     dimensions: QualityDimensions,
+    samples: list[InverterTelemetrySample],
     profile: MeasurementPlausibilityProfile | None,
-    samples: list[InverterTelemetrySample] | list[PlantFlowSample],
-    source_type: SourceType,
 ) -> QualityDimensions:
     if profile is None:
         return dimensions
-    if source_type == SourceType.SOLARMAN_INVERTER_TELEMETRY:
-        plausibility = evaluate_inverter_telemetry(
-            samples,  # type: ignore[arg-type]
-            profile=profile,
-        )
-    elif source_type == SourceType.SOLARMAN_PLANT_FLOW:
-        plausibility = evaluate_plant_flow(
-            samples,  # type: ignore[arg-type]
-            profile=profile,
-        )
-    else:
+    plausibility = evaluate_inverter_telemetry(samples, profile=profile)
+    if plausibility.evaluated_count == 0:
         return dimensions
+    return dimensions.model_copy(update={"plausibility_score": plausibility.score})
+
+
+def _apply_flow_plausibility(
+    dimensions: QualityDimensions,
+    samples: list[PlantFlowSample],
+    profile: MeasurementPlausibilityProfile | None,
+) -> QualityDimensions:
+    if profile is None:
+        return dimensions
+    plausibility = evaluate_plant_flow(samples, profile=profile)
     if plausibility.evaluated_count == 0:
         return dimensions
     return dimensions.model_copy(update={"plausibility_score": plausibility.score})
@@ -62,7 +63,7 @@ def analyze_telemetry(
         gaps=gaps,
     )
 
-    dimensions = _apply_plausibility(dimensions, plausibility_profile, samples, source_type)
+    dimensions = _apply_telemetry_plausibility(dimensions, samples, plausibility_profile)
 
     quality_score = 0.0 if not samples else aggregate_quality_score(dimensions)
 
@@ -98,7 +99,7 @@ def analyze_plant_flow(
         gaps=gaps,
     )
 
-    dimensions = _apply_plausibility(dimensions, plausibility_profile, samples, source_type)
+    dimensions = _apply_flow_plausibility(dimensions, samples, plausibility_profile)
 
     quality_score = 0.0 if not samples else aggregate_quality_score(dimensions)
 

@@ -86,29 +86,44 @@ def _profile(*ranges: MeasurementRange) -> MeasurementPlausibilityProfile:
 
 
 class TestNonFiniteCheck:
-    def test_nan_produces_finding(self) -> None:
+    def test_nan_accounting(self) -> None:
         sample = _telemetry({"potencia_cc_pv1_w": float("nan")})
         result = evaluate_inverter_telemetry([sample])
         assert len(result.findings) == 1
         assert result.findings[0].reason_code == PlausibilityReasonCode.NAN
         assert math.isnan(result.findings[0].observed_value)
+        assert result.evaluated_count == 1
+        assert result.passed_count == 0
+        assert result.failed_count == 1
+        assert result.not_configured_count == 0
+        assert result.score == pytest.approx(0.0, abs=1e-9)
 
-    def test_positive_infinity_produces_finding(self) -> None:
+    def test_positive_infinity_accounting(self) -> None:
         sample = _telemetry({"potencia_cc_pv1_w": float("inf")})
         result = evaluate_inverter_telemetry([sample])
         assert len(result.findings) == 1
         assert result.findings[0].reason_code == PlausibilityReasonCode.POSITIVE_INFINITY
         assert math.isinf(result.findings[0].observed_value)
         assert result.findings[0].observed_value > 0
+        assert result.evaluated_count == 1
+        assert result.passed_count == 0
+        assert result.failed_count == 1
+        assert result.not_configured_count == 0
+        assert result.score == pytest.approx(0.0, abs=1e-9)
 
-    def test_negative_infinity_produces_finding(self) -> None:
+    def test_negative_infinity_accounting(self) -> None:
         sample = _telemetry({"potencia_cc_pv1_w": float("-inf")})
         result = evaluate_inverter_telemetry([sample])
         assert len(result.findings) == 1
         assert result.findings[0].reason_code == PlausibilityReasonCode.NEGATIVE_INFINITY
         assert result.findings[0].observed_value < 0
+        assert result.evaluated_count == 1
+        assert result.passed_count == 0
+        assert result.failed_count == 1
+        assert result.not_configured_count == 0
+        assert result.score == pytest.approx(0.0, abs=1e-9)
 
-    def test_finite_normal_value_passes_with_profile_range(self) -> None:
+    def test_finite_normal_value_with_profile_passes(self) -> None:
         sample = _telemetry({"potencia_cc_pv1_w": 1500.0})
         profile = _profile(_range("potencia_cc_pv1_w", minimum=0.0, maximum=5000.0, unit="W"))
         result = evaluate_inverter_telemetry([sample], profile=profile)
@@ -116,11 +131,12 @@ class TestNonFiniteCheck:
         assert result.evaluated_count == 1
         assert result.passed_count == 1
         assert result.failed_count == 0
+        assert result.not_configured_count == 0
         assert result.score == pytest.approx(1.0, abs=1e-9)
 
 
 class TestSocUniversalRange:
-    def test_soc_minus_one_produces_finding(self) -> None:
+    def test_soc_minus_one_accounting(self) -> None:
         sample = _telemetry({"soc_pct": -1.0})
         result = evaluate_inverter_telemetry([sample])
         assert len(result.findings) == 1
@@ -130,26 +146,54 @@ class TestSocUniversalRange:
         assert finding.minimum == 0.0
         assert finding.maximum == 100.0
         assert finding.unit == "%"
+        assert result.evaluated_count == 1
+        assert result.passed_count == 0
+        assert result.failed_count == 1
+        assert result.not_configured_count == 0
+        assert result.score == pytest.approx(0.0, abs=1e-9)
 
-    def test_soc_101_produces_finding(self) -> None:
+    def test_soc_101_accounting(self) -> None:
         sample = _telemetry({"soc_pct": 101.0})
         result = evaluate_inverter_telemetry([sample])
         assert len(result.findings) == 1
         assert result.findings[0].reason_code == PlausibilityReasonCode.SOC_OUT_OF_RANGE
+        assert result.evaluated_count == 1
+        assert result.failed_count == 1
+        assert result.score == pytest.approx(0.0, abs=1e-9)
 
-    def test_soc_zero_is_valid_no_finding(self) -> None:
+    def test_soc_zero_accounting(self) -> None:
         sample = _telemetry({"soc_pct": 0.0})
         result = evaluate_inverter_telemetry([sample])
         assert result.findings == ()
+        assert result.evaluated_count == 1
+        assert result.passed_count == 1
+        assert result.failed_count == 0
+        assert result.not_configured_count == 0
+        assert result.score == pytest.approx(1.0, abs=1e-9)
 
-    def test_soc_100_is_valid_no_finding(self) -> None:
+    def test_soc_50_accounting(self) -> None:
+        sample = _telemetry({"soc_pct": 50.0})
+        result = evaluate_inverter_telemetry([sample])
+        assert result.findings == ()
+        assert result.evaluated_count == 1
+        assert result.passed_count == 1
+        assert result.failed_count == 0
+        assert result.not_configured_count == 0
+        assert result.score == pytest.approx(1.0, abs=1e-9)
+
+    def test_soc_100_accounting(self) -> None:
         sample = _telemetry({"soc_pct": 100.0})
         result = evaluate_inverter_telemetry([sample])
         assert result.findings == ()
+        assert result.evaluated_count == 1
+        assert result.passed_count == 1
+        assert result.failed_count == 0
+        assert result.not_configured_count == 0
+        assert result.score == pytest.approx(1.0, abs=1e-9)
 
 
 class TestTemperatureAbsoluteZero:
-    def test_below_absolute_zero_produces_finding(self) -> None:
+    def test_below_absolute_zero_accounting(self) -> None:
         sample = _telemetry({"temperatura_ambiente_c": -300.0})
         result = evaluate_inverter_telemetry([sample])
         assert len(result.findings) == 1
@@ -157,32 +201,43 @@ class TestTemperatureAbsoluteZero:
         assert finding.reason_code == PlausibilityReasonCode.BELOW_ABSOLUTE_ZERO
         assert finding.minimum == -273.15
         assert finding.unit == "C"
+        assert result.evaluated_count == 1
+        assert result.failed_count == 1
+        assert result.passed_count == 0
+        assert result.score == pytest.approx(0.0, abs=1e-9)
 
-    def test_high_temperature_without_profile_is_not_configured(self) -> None:
+    def test_temperature_80_without_profile_is_not_configured(self) -> None:
         sample = _telemetry({"temperatura_ambiente_c": 80.0})
         result = evaluate_inverter_telemetry([sample])
         assert result.findings == ()
-        assert result.not_configured_count == 1
         assert result.evaluated_count == 0
+        assert result.passed_count == 0
+        assert result.failed_count == 0
+        assert result.not_configured_count == 1
         assert result.score is None
 
     def test_exactly_absolute_zero_does_not_fire(self) -> None:
         sample = _telemetry({"temperatura_ambiente_c": -273.15})
         result = evaluate_inverter_telemetry([sample])
         assert result.findings == ()
+        assert result.evaluated_count == 0
+        assert result.not_configured_count == 1
+        assert result.score is None
 
 
 class TestProfileRange:
-    def test_within_range_passes(self) -> None:
+    def test_within_range_passes_accounting(self) -> None:
         sample = _telemetry({"potencia_cc_pv1_w": 2000.0})
         profile = _profile(_range("potencia_cc_pv1_w", minimum=0.0, maximum=5000.0, unit="W"))
         result = evaluate_inverter_telemetry([sample], profile=profile)
         assert result.findings == ()
         assert result.evaluated_count == 1
         assert result.passed_count == 1
+        assert result.failed_count == 0
+        assert result.not_configured_count == 0
         assert result.score == pytest.approx(1.0, abs=1e-9)
 
-    def test_below_minimum_fails(self) -> None:
+    def test_below_minimum_fails_accounting(self) -> None:
         sample = _telemetry({"potencia_cc_pv1_w": -10.0})
         profile = _profile(_range("potencia_cc_pv1_w", minimum=0.0, maximum=5000.0, unit="W"))
         result = evaluate_inverter_telemetry([sample], profile=profile)
@@ -194,21 +249,27 @@ class TestProfileRange:
         assert finding.observed_value == -10.0
         assert result.evaluated_count == 1
         assert result.failed_count == 1
+        assert result.passed_count == 0
         assert result.score == 0.0
 
-    def test_above_maximum_fails(self) -> None:
+    def test_above_maximum_fails_accounting(self) -> None:
         sample = _telemetry({"potencia_cc_pv1_w": 9000.0})
         profile = _profile(_range("potencia_cc_pv1_w", minimum=0.0, maximum=5000.0, unit="W"))
         result = evaluate_inverter_telemetry([sample], profile=profile)
         assert len(result.findings) == 1
         assert result.findings[0].reason_code == PlausibilityReasonCode.ABOVE_MAXIMUM
+        assert result.evaluated_count == 1
+        assert result.failed_count == 1
+        assert result.score == 0.0
 
     def test_unconfigured_range_does_not_penalize(self) -> None:
         sample = _telemetry({"voltaje_ca_r_u_a_v": 120.0})
         result = evaluate_inverter_telemetry([sample])
         assert result.findings == ()
-        assert result.not_configured_count == 1
         assert result.evaluated_count == 0
+        assert result.passed_count == 0
+        assert result.failed_count == 0
+        assert result.not_configured_count == 1
         assert result.score is None
 
 
@@ -278,6 +339,12 @@ class TestDeterminism:
         r2 = evaluate_inverter_telemetry([sample], profile=profile)
         assert r1 == r2
 
+    def test_repeated_execution_on_nonfinite_is_identical(self) -> None:
+        sample = _telemetry({"potencia_cc_pv1_w": float("nan")})
+        r1 = evaluate_inverter_telemetry([sample])
+        r2 = evaluate_inverter_telemetry([sample])
+        assert r1 == r2
+
 
 class TestScoreSemantics:
     def test_evaluated_count_zero_implies_none_score(self) -> None:
@@ -293,6 +360,7 @@ class TestScoreSemantics:
         assert result.evaluated_count == 2
         assert result.passed_count == 1
         assert result.failed_count == 1
+        assert result.not_configured_count == 0
         assert result.score == pytest.approx(0.5, abs=1e-9)
 
     def test_not_configured_signals_dont_affect_score(self) -> None:
@@ -305,6 +373,74 @@ class TestScoreSemantics:
         assert result.passed_count == 1
         assert result.score == pytest.approx(1.0, abs=1e-9)
 
+    def test_mix_of_passing_failing_and_not_configured(self) -> None:
+        passing = _telemetry({"potencia_cc_pv1_w": 2000.0})
+        failing = _telemetry({"potencia_cc_pv1_w": 9000.0})
+        unconfigured_a = _telemetry({"voltaje_ca_r_u_a_v": 120.0})
+        unconfigured_b = _telemetry({"frecuencia_de_red_hz": 60.0})
+        profile = _profile(_range("potencia_cc_pv1_w", minimum=0.0, maximum=5000.0, unit="W"))
+        result = evaluate_inverter_telemetry(
+            [passing, failing, unconfigured_a, unconfigured_b], profile=profile
+        )
+        assert result.evaluated_count == 2
+        assert result.passed_count == 1
+        assert result.failed_count == 1
+        assert result.not_configured_count == 2
+        assert result.score == pytest.approx(0.5, abs=1e-9)
+
+
+class TestInvariants:
+    def test_invariant_holds_for_each_result(self) -> None:
+        cases = [
+            _telemetry({"soc_pct": 50.0}),
+            _telemetry({"soc_pct": 101.0}),
+            _telemetry({"temperatura_ambiente_c": 80.0}),
+            _telemetry({"temperatura_ambiente_c": -300.0}),
+            _telemetry({"potencia_cc_pv1_w": float("nan")}),
+            _telemetry({"voltaje_ca_r_u_a_v": 120.0}),
+        ]
+        for sample in cases:
+            r = evaluate_inverter_telemetry([sample])
+            assert r.evaluated_count == r.passed_count + r.failed_count, (
+                f"invariant failed for {sample.signals}"
+            )
+
+    def test_invariant_violation_rejected_by_constructor(self) -> None:
+        with pytest.raises(ValidationError, match="invariant"):
+            PlausibilityResult(
+                evaluated_count=2,
+                passed_count=1,
+                failed_count=1,
+                score=0.0,
+            )
+
+    def test_score_with_zero_evaluated_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="invariant"):
+            PlausibilityResult(
+                evaluated_count=0,
+                passed_count=0,
+                failed_count=0,
+                score=0.5,
+            )
+
+    def test_none_score_with_nonzero_evaluated_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="invariant"):
+            PlausibilityResult(
+                evaluated_count=1,
+                passed_count=1,
+                failed_count=0,
+                score=None,
+            )
+
+    def test_score_mismatch_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="invariant"):
+            PlausibilityResult(
+                evaluated_count=2,
+                passed_count=1,
+                failed_count=1,
+                score=0.9,
+            )
+
 
 class TestSerialization:
     def test_model_dump_contains_findings_and_score(self) -> None:
@@ -314,6 +450,10 @@ class TestSerialization:
         dumped = result.model_dump()
         assert "findings" in dumped
         assert "score" in dumped
+        assert "evaluated_count" in dumped
+        assert "passed_count" in dumped
+        assert "failed_count" in dumped
+        assert "not_configured_count" in dumped
         assert len(dumped["findings"]) == 1
         assert dumped["score"] == 0.0
 
@@ -333,6 +473,8 @@ class TestSerialization:
         assert "findings" in dumped
         assert len(dumped["findings"]) == 1
         assert math.isnan(dumped["findings"][0]["observed_value"])
+        assert dumped["evaluated_count"] == 1
+        assert dumped["failed_count"] == 1
 
 
 class TestQualityDimensionsIntegration:
@@ -350,6 +492,11 @@ class TestQualityDimensionsIntegration:
 
     def test_plausibility_score_none_when_no_profile(self) -> None:
         sample = _telemetry({"potencia_cc_pv1_w": 2000.0})
+        result = analyze_telemetry([sample], SourceType.SOLARMAN_INVERTER_TELEMETRY)
+        assert result.dimensions.plausibility_score is None
+
+    def test_plausibility_score_none_when_soc_valid_without_profile(self) -> None:
+        sample = _telemetry({"soc_pct": 50.0})
         result = analyze_telemetry([sample], SourceType.SOLARMAN_INVERTER_TELEMETRY)
         assert result.dimensions.plausibility_score is None
 
@@ -387,16 +534,22 @@ class TestQualityDimensionsIntegration:
 
 
 class TestFlowPlausibility:
-    def test_flow_with_nan_in_numeric_field_produces_finding(self) -> None:
+    def test_flow_with_nan_in_numeric_field_accounting(self) -> None:
         sample = _flow(potencia_de_produccion_w=float("nan"))
         result = evaluate_plant_flow([sample])
         assert len(result.findings) == 1
         assert result.findings[0].reason_code == PlausibilityReasonCode.NAN
+        assert result.evaluated_count == 1
+        assert result.failed_count == 1
+        assert result.score == 0.0
 
-    def test_flow_soc_in_range_no_finding(self) -> None:
+    def test_flow_soc_in_range_accounting(self) -> None:
         sample = _flow(soc_pct=50.0)
         result = evaluate_plant_flow([sample])
         assert result.findings == ()
+        assert result.evaluated_count == 1
+        assert result.passed_count == 1
+        assert result.score == pytest.approx(1.0, abs=1e-9)
 
     def test_flow_soc_out_of_range_blocked_by_pydantic(self) -> None:
         with pytest.raises(ValidationError):
@@ -434,6 +587,12 @@ class TestPlausibilityResultConstruction:
                 passed_count=1,
                 score=1.5,
             )
+
+    def test_evaluated_count_description_updated(self) -> None:
+        field = PlausibilityResult.model_fields["evaluated_count"]
+        description = field.description or ""
+        assert "universal" in description.lower()
+        assert "profile-backed" in description.lower()
 
 
 class TestMeasurementProfileConstruction:
