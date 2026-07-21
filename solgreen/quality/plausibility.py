@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 from collections.abc import Callable, Iterable
 from datetime import datetime
-from typing import TypeVar
+from typing import Any
 
 from solgreen.contracts.enums import SourceType
 from solgreen.contracts.inverter_telemetry import SIGNAL_SPECS, InverterTelemetrySample
@@ -15,9 +15,6 @@ from solgreen.quality._plausibility_types import (
     PlausibilityReasonCode,
     PlausibilityResult,
 )
-
-
-_SampleT = TypeVar("_SampleT", InverterTelemetrySample, PlantFlowSample)
 
 CHECK_VERSION = "1.0.0"
 
@@ -211,11 +208,11 @@ def _evaluate_signal(
 
 
 def _evaluate_samples(
-    samples: Iterable[_SampleT],
+    samples: Iterable[Any],
     *,
     source_type: SourceType,
     profile: MeasurementPlausibilityProfile | None,
-    extract: Callable[[_SampleT], list[tuple[str, float]]],
+    extract: Callable[[Any], list[tuple[str, float]]],
 ) -> PlausibilityResult:
     findings: list[PlausibilityFinding] = []
     evaluated_count = 0
