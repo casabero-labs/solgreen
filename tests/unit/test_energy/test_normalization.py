@@ -1,0 +1,505 @@
+from __future__ import annotations
+
+import math
+from datetime import UTC, datetime
+
+from solgreen.energy.normalization import (
+    DirectionalPowerResult,
+    NormalizationStatus,
+    normalize_power_value,
+)
+from solgreen.energy.sign_profiles import (
+    AuthorityClass,
+    CanonicalPowerField,
+    PowerDirection,
+    PowerSignProfile,
+    PowerSignProfileRegistry,
+    ProfileStatus,
+    SourceSystem,
+)
+
+_TS = datetime(2026, 7, 21, 12, 0, 0, tzinfo=UTC)
+_VALID_TO = datetime(2026, 8, 1, 12, 0, 0, tzinfo=UTC)
+
+
+def _grid_profile(
+    positive: PowerDirection = PowerDirection.GRID_IMPORT,
+    negative: PowerDirection = PowerDirection.GRID_EXPORT,
+    authority: AuthorityClass = AuthorityClass.OPERATIONAL,
+    field: CanonicalPowerField = CanonicalPowerField.FLOW_GRID,
+    source: SourceSystem = SourceSystem.SOLARMAN_PLANT_FLOW,
+) -> PowerSignProfile:
+    return PowerSignProfile(
+        plant_id="casabero",
+        canonical_field=field,
+        source_system=source,
+        authority_class=authority,
+        measurement_point="grid_meter",
+        unit="W",
+        positive_means=positive,
+        negative_means=negative,
+        status=ProfileStatus.CONFIRMED,
+        evidence_refs=("obs:grid-01",),
+        profile_version="1.0.0",
+        valid_from=_TS,
+        valid_to=_VALID_TO,
+    )
+
+
+def _grid_profile_inverted(
+    field: CanonicalPowerField = CanonicalPowerField.FLOW_GRID,
+    source: SourceSystem = SourceSystem.SOLARMAN_PLANT_FLOW,
+) -> PowerSignProfile:
+    return _grid_profile(
+        positive=PowerDirection.GRID_EXPORT,
+        negative=PowerDirection.GRID_IMPORT,
+        field=field,
+        source=source,
+    )
+
+
+def _battery_profile(
+    positive: PowerDirection = PowerDirection.BATTERY_DISCHARGE,
+    negative: PowerDirection = PowerDirection.BATTERY_CHARGE,
+    field: CanonicalPowerField = CanonicalPowerField.FLOW_BATTERY,
+    source: SourceSystem = SourceSystem.SOLARMAN_PLANT_FLOW,
+) -> PowerSignProfile:
+    return PowerSignProfile(
+        plant_id="casabero",
+        canonical_field=field,
+        source_system=source,
+        authority_class=AuthorityClass.OPERATIONAL,
+        measurement_point="battery_terminals",
+        unit="W",
+        positive_means=positive,
+        negative_means=negative,
+        status=ProfileStatus.CONFIRMED,
+        evidence_refs=("obs:battery-01",),
+        profile_version="1.0.0",
+        valid_from=_TS,
+        valid_to=_VALID_TO,
+    )
+
+
+def _battery_profile_inverted(
+    field: CanonicalPowerField = CanonicalPowerField.FLOW_BATTERY,
+    source: SourceSystem = SourceSystem.SOLARMAN_PLANT_FLOW,
+) -> PowerSignProfile:
+    return _battery_profile(
+        positive=PowerDirection.BATTERY_CHARGE,
+        negative=PowerDirection.BATTERY_DISCHARGE,
+        field=field,
+        source=source,
+    )
+
+
+def _pv_profile(
+    field: CanonicalPowerField = CanonicalPowerField.TELEMETRY_PV,
+    source: SourceSystem = SourceSystem.INVERTER_TELEMETRY,
+) -> PowerSignProfile:
+    return PowerSignProfile(
+        plant_id="casabero",
+        canonical_field=field,
+        source_system=source,
+        authority_class=AuthorityClass.OPERATIONAL,
+        measurement_point="mppt",
+        unit="W",
+        positive_means=PowerDirection.PV_GENERATION,
+        negative_means=PowerDirection.UNKNOWN,
+        status=ProfileStatus.CONFIRMED,
+        evidence_refs=("obs:pv-01",),
+        profile_version="1.0.0",
+        valid_from=_TS,
+        valid_to=_VALID_TO,
+    )
+
+
+def _load_profile() -> PowerSignProfile:
+    return PowerSignProfile(
+        plant_id="casabero",
+        canonical_field=CanonicalPowerField.FLOW_CONSUMO,
+        source_system=SourceSystem.SOLARMAN_PLANT_FLOW,
+        authority_class=AuthorityClass.OPERATIONAL,
+        measurement_point="load_side",
+        unit="W",
+        positive_means=PowerDirection.LOAD_CONSUMPTION,
+        negative_means=PowerDirection.UNKNOWN,
+        status=ProfileStatus.CONFIRMED,
+        evidence_refs=("obs:load-01",),
+        profile_version="1.0.0",
+        valid_from=_TS,
+        valid_to=_VALID_TO,
+    )
+
+
+def _normalize(
+    field: CanonicalPowerField,
+    source: SourceSystem,
+    raw: float | None,
+    registry: PowerSignProfileRegistry,
+) -> DirectionalPowerResult:
+    return normalize_power_value(
+        plant_id="casabero",
+        canonical_field=field,
+        source_system=source,
+        timestamp=_TS,
+        raw_power_w=raw,
+        registry=registry,
+    )
+
+
+class TestNormalizationProfileResolution:
+    def test_profile_absent_returns_not_found(self) -> None:
+        reg = PowerSignProfileRegistry()
+        result = _normalize(
+            CanonicalPowerField.FLOW_GRID,
+            SourceSystem.SOLARMAN_PLANT_FLOW,
+            100.0,
+            reg,
+        )
+        assert result.status is NormalizationStatus.PROFILE_NOT_FOUND
+        assert result.profile_version is None
+        assert result.profile_status is None
+
+    def test_provisional_returns_not_confirmed(self) -> None:
+        reg = PowerSignProfileRegistry()
+        p = _grid_profile()
+        p = PowerSignProfile(
+            plant_id=p.plant_id,
+            canonical_field=p.canonical_field,
+            source_system=p.source_system,
+            authority_class=p.authority_class,
+            measurement_point=p.measurement_point,
+            unit=p.unit,
+            positive_means=p.positive_means,
+            negative_means=p.negative_means,
+            status=ProfileStatus.PROVISIONAL,
+            evidence_refs=(),
+            profile_version=p.profile_version,
+            valid_from=p.valid_from,
+            valid_to=p.valid_to,
+        )
+        reg.register(p)
+        result = _normalize(
+            CanonicalPowerField.FLOW_GRID,
+            SourceSystem.SOLARMAN_PLANT_FLOW,
+            100.0,
+            reg,
+        )
+        assert result.status is NormalizationStatus.PROFILE_NOT_CONFIRMED
+        assert result.profile_status is ProfileStatus.PROVISIONAL
+
+    def test_unknown_returns_not_confirmed(self) -> None:
+        reg = PowerSignProfileRegistry()
+        p = _grid_profile()
+        p = PowerSignProfile(
+            plant_id=p.plant_id,
+            canonical_field=p.canonical_field,
+            source_system=p.source_system,
+            authority_class=p.authority_class,
+            measurement_point=p.measurement_point,
+            unit=p.unit,
+            positive_means=PowerDirection.UNKNOWN,
+            negative_means=PowerDirection.UNKNOWN,
+            status=ProfileStatus.UNKNOWN,
+            evidence_refs=(),
+            profile_version=p.profile_version,
+            valid_from=p.valid_from,
+            valid_to=p.valid_to,
+        )
+        reg.register(p)
+        result = _normalize(
+            CanonicalPowerField.FLOW_GRID,
+            SourceSystem.SOLARMAN_PLANT_FLOW,
+            100.0,
+            reg,
+        )
+        assert result.status is NormalizationStatus.PROFILE_NOT_CONFIRMED
+        assert result.profile_status is ProfileStatus.UNKNOWN
+
+    def test_none_returns_missing_value(self) -> None:
+        reg = PowerSignProfileRegistry()
+        result = _normalize(
+            CanonicalPowerField.FLOW_GRID,
+            SourceSystem.SOLARMAN_PLANT_FLOW,
+            None,
+            reg,
+        )
+        assert result.status is NormalizationStatus.MISSING_VALUE
+        assert result.raw_power_w is None
+
+    def test_nan_returns_nonfinite(self) -> None:
+        reg = PowerSignProfileRegistry()
+        result = _normalize(
+            CanonicalPowerField.FLOW_GRID,
+            SourceSystem.SOLARMAN_PLANT_FLOW,
+            float("nan"),
+            reg,
+        )
+        assert result.status is NormalizationStatus.NONFINITE_VALUE
+        assert math.isnan(result.raw_power_w)
+
+    def test_inf_returns_nonfinite(self) -> None:
+        reg = PowerSignProfileRegistry()
+        result_pos = _normalize(
+            CanonicalPowerField.FLOW_GRID,
+            SourceSystem.SOLARMAN_PLANT_FLOW,
+            float("inf"),
+            reg,
+        )
+        result_neg = _normalize(
+            CanonicalPowerField.FLOW_GRID,
+            SourceSystem.SOLARMAN_PLANT_FLOW,
+            float("-inf"),
+            reg,
+        )
+        assert result_pos.status is NormalizationStatus.NONFINITE_VALUE
+        assert result_neg.status is NormalizationStatus.NONFINITE_VALUE
+
+
+class TestGridNormalization:
+    def test_grid_positive_import(self) -> None:
+        reg = PowerSignProfileRegistry()
+        reg.register(_grid_profile())
+        result = _normalize(
+            CanonicalPowerField.FLOW_GRID,
+            SourceSystem.SOLARMAN_PLANT_FLOW,
+            1500.0,
+            reg,
+        )
+        assert result.status is NormalizationStatus.NORMALIZED
+        assert result.grid_import_w == 1500.0
+        assert result.grid_export_w is None
+
+    def test_grid_negative_export(self) -> None:
+        reg = PowerSignProfileRegistry()
+        reg.register(_grid_profile())
+        result = _normalize(
+            CanonicalPowerField.FLOW_GRID,
+            SourceSystem.SOLARMAN_PLANT_FLOW,
+            -800.0,
+            reg,
+        )
+        assert result.status is NormalizationStatus.NORMALIZED
+        assert result.grid_export_w == 800.0
+        assert result.grid_import_w is None
+
+    def test_grid_inverted_profile(self) -> None:
+        reg = PowerSignProfileRegistry()
+        reg.register(_grid_profile_inverted())
+        result = _normalize(
+            CanonicalPowerField.FLOW_GRID,
+            SourceSystem.SOLARMAN_PLANT_FLOW,
+            1500.0,
+            reg,
+        )
+        assert result.status is NormalizationStatus.NORMALIZED
+        assert result.grid_export_w == 1500.0
+        assert result.grid_import_w is None
+
+    def test_grid_zero_preserves_both_zeros(self) -> None:
+        reg = PowerSignProfileRegistry()
+        reg.register(_grid_profile())
+        result = _normalize(
+            CanonicalPowerField.FLOW_GRID,
+            SourceSystem.SOLARMAN_PLANT_FLOW,
+            0.0,
+            reg,
+        )
+        assert result.status is NormalizationStatus.NORMALIZED
+        assert result.raw_power_w == 0.0
+        assert result.grid_import_w == 0.0
+        assert result.grid_export_w == 0.0
+
+    def test_telemetry_grid_works(self) -> None:
+        reg = PowerSignProfileRegistry()
+        reg.register(
+            _grid_profile(
+                field=CanonicalPowerField.TELEMETRY_GRID,
+                source=SourceSystem.INVERTER_TELEMETRY,
+            )
+        )
+        result = _normalize(
+            CanonicalPowerField.TELEMETRY_GRID,
+            SourceSystem.INVERTER_TELEMETRY,
+            500.0,
+            reg,
+        )
+        assert result.status is NormalizationStatus.NORMALIZED
+        assert result.grid_import_w == 500.0
+
+
+class TestBatteryNormalization:
+    def test_battery_positive_discharge(self) -> None:
+        reg = PowerSignProfileRegistry()
+        reg.register(_battery_profile())
+        result = _normalize(
+            CanonicalPowerField.FLOW_BATTERY,
+            SourceSystem.SOLARMAN_PLANT_FLOW,
+            2000.0,
+            reg,
+        )
+        assert result.status is NormalizationStatus.NORMALIZED
+        assert result.battery_discharge_w == 2000.0
+        assert result.battery_charge_w is None
+
+    def test_battery_negative_charge(self) -> None:
+        reg = PowerSignProfileRegistry()
+        reg.register(_battery_profile())
+        result = _normalize(
+            CanonicalPowerField.FLOW_BATTERY,
+            SourceSystem.SOLARMAN_PLANT_FLOW,
+            -1500.0,
+            reg,
+        )
+        assert result.status is NormalizationStatus.NORMALIZED
+        assert result.battery_charge_w == 1500.0
+        assert result.battery_discharge_w is None
+
+    def test_battery_inverted_profile(self) -> None:
+        reg = PowerSignProfileRegistry()
+        reg.register(_battery_profile_inverted())
+        result = _normalize(
+            CanonicalPowerField.FLOW_BATTERY,
+            SourceSystem.SOLARMAN_PLANT_FLOW,
+            2000.0,
+            reg,
+        )
+        assert result.status is NormalizationStatus.NORMALIZED
+        assert result.battery_charge_w == 2000.0
+        assert result.battery_discharge_w is None
+
+    def test_battery_zero_preserves_both_zeros(self) -> None:
+        reg = PowerSignProfileRegistry()
+        reg.register(_battery_profile())
+        result = _normalize(
+            CanonicalPowerField.FLOW_BATTERY,
+            SourceSystem.SOLARMAN_PLANT_FLOW,
+            0.0,
+            reg,
+        )
+        assert result.status is NormalizationStatus.NORMALIZED
+        assert result.raw_power_w == 0.0
+        assert result.battery_charge_w == 0.0
+        assert result.battery_discharge_w == 0.0
+
+
+class TestUnsignedNormalization:
+    def test_pv_positive_generation(self) -> None:
+        reg = PowerSignProfileRegistry()
+        reg.register(_pv_profile())
+        result = _normalize(
+            CanonicalPowerField.TELEMETRY_PV,
+            SourceSystem.INVERTER_TELEMETRY,
+            3500.0,
+            reg,
+        )
+        assert result.status is NormalizationStatus.NORMALIZED
+        assert result.pv_generation_w == 3500.0
+
+    def test_load_positive_consumption(self) -> None:
+        reg = PowerSignProfileRegistry()
+        reg.register(_load_profile())
+        result = _normalize(
+            CanonicalPowerField.FLOW_CONSUMO,
+            SourceSystem.SOLARMAN_PLANT_FLOW,
+            1200.0,
+            reg,
+        )
+        assert result.status is NormalizationStatus.NORMALIZED
+        assert result.load_consumption_w == 1200.0
+
+    def test_pv_negative_rejected(self) -> None:
+        reg = PowerSignProfileRegistry()
+        reg.register(_pv_profile())
+        result = _normalize(
+            CanonicalPowerField.TELEMETRY_PV,
+            SourceSystem.INVERTER_TELEMETRY,
+            -100.0,
+            reg,
+        )
+        assert result.status is NormalizationStatus.INVALID_UNSIGNED_NEGATIVE
+        assert result.pv_generation_w is None
+
+    def test_load_negative_rejected(self) -> None:
+        reg = PowerSignProfileRegistry()
+        reg.register(_load_profile())
+        result = _normalize(
+            CanonicalPowerField.FLOW_CONSUMO,
+            SourceSystem.SOLARMAN_PLANT_FLOW,
+            -50.0,
+            reg,
+        )
+        assert result.status is NormalizationStatus.INVALID_UNSIGNED_NEGATIVE
+        assert result.load_consumption_w is None
+
+    def test_pv_zero_preserves_zero(self) -> None:
+        reg = PowerSignProfileRegistry()
+        reg.register(_pv_profile())
+        result = _normalize(
+            CanonicalPowerField.TELEMETRY_PV,
+            SourceSystem.INVERTER_TELEMETRY,
+            0.0,
+            reg,
+        )
+        assert result.status is NormalizationStatus.NORMALIZED
+        assert result.raw_power_w == 0.0
+        assert result.pv_generation_w == 0.0
+
+
+class TestNormalizationInvariants:
+    def test_non_normalized_does_not_populate_directions(self) -> None:
+        reg = PowerSignProfileRegistry()
+        result = _normalize(
+            CanonicalPowerField.FLOW_GRID,
+            SourceSystem.SOLARMAN_PLANT_FLOW,
+            100.0,
+            reg,
+        )
+        assert result.status is NormalizationStatus.PROFILE_NOT_FOUND
+        assert result.grid_import_w is None
+        assert result.grid_export_w is None
+
+    def test_authority_operational_remains_operational(self) -> None:
+        reg = PowerSignProfileRegistry()
+        reg.register(_grid_profile(authority=AuthorityClass.OPERATIONAL))
+        result = _normalize(
+            CanonicalPowerField.FLOW_GRID,
+            SourceSystem.SOLARMAN_PLANT_FLOW,
+            100.0,
+            reg,
+        )
+        assert result.authority_class is AuthorityClass.OPERATIONAL
+        assert result.status is NormalizationStatus.NORMALIZED
+
+    def test_repeat_input_produces_identical_output(self) -> None:
+        reg = PowerSignProfileRegistry()
+        reg.register(_grid_profile())
+        r1 = _normalize(
+            CanonicalPowerField.FLOW_GRID,
+            SourceSystem.SOLARMAN_PLANT_FLOW,
+            100.0,
+            reg,
+        )
+        r2 = _normalize(
+            CanonicalPowerField.FLOW_GRID,
+            SourceSystem.SOLARMAN_PLANT_FLOW,
+            100.0,
+            reg,
+        )
+        assert r1.model_dump() == r2.model_dump()
+
+    def test_model_dump_and_json_stable(self) -> None:
+        reg = PowerSignProfileRegistry()
+        reg.register(_grid_profile())
+        result = _normalize(
+            CanonicalPowerField.FLOW_GRID,
+            SourceSystem.SOLARMAN_PLANT_FLOW,
+            100.0,
+            reg,
+        )
+        dumped = result.model_dump()
+        json_str = result.model_dump_json()
+        assert dumped["status"] == "normalized"
+        assert "grid_import_w" in json_str
+        assert "grid_export_w" in json_str
