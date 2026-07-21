@@ -31,6 +31,7 @@ jobs:
           test -f docs/qa_reports/TEST_PLAN.md
           test -f docs/qa_reports/FRONTEND_FOUNDATION_TEST_PLAN.md
           test -f docs/qa_reports/ECONOMIC_INTELLIGENCE_TEST_PLAN.md
+          test -f docs/qa_reports/U1_DATA_QUALITY_RESULTS_2026-07-21.md
           test -f apps/web/package.json
           test -f apps/web/package-lock.json
 
