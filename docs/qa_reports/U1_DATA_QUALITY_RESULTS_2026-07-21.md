@@ -5,9 +5,10 @@
 - Fecha: 2026-07-21
 - Línea: `develop/solgreen-unified`
 - PR: #27
-- SHA final: `9c76912f7953d0b0d6a9da1a75e9c515370e5965`
-- CI push final: run #123
-- CI PR final: run #124
+- Último SHA de código productivo U1: `9c76912f7953d0b0d6a9da1a75e9c515370e5965` (U1.6)
+- SHA final del cierre U1: `301fd356253ac2375ad9b6e39358952ed516afae` (U1.7)
+- CI push final U1.7: run #127
+- CI PR final U1.7: run #128
 
 ## Objetivo
 
@@ -219,8 +220,24 @@ npm run build
 
 ## Rollback
 
-Revertir commits U1 en `develop/solgreen-unified`. Main conserva R0 + U0.
+- revertir el commit documental `6bb3e73` si la narrativa queda incoherente;
+- revertir `301fd35` si el gate documental necesita retirarse;
+- restaurar el body anterior del PR si fuera necesario;
+- no revertir commits productivos U1.1–U1.6 salvo defecto funcional
+  independiente;
+- main permanece intacto mientras el PR no sea fusionado.
+
+## Estado final
+
+- U0: TECHNICALLY_VERIFIED_HUMAN_GATE
+- U1: ENGINEERING_CLOSED
+- U2: NEXT_PLANNED
+- PR #27: open, draft, mergeable
+- Merge: human gate pendiente
 
 ## Próximo paso exacto
 
-**U2.0** — Energy semantics, sign profiles and integration contract discovery.
+U2.0 — Energy semantics, sign profiles and integration contract discovery.
+
+U2.0 debe comenzar con DISCOVER y PLAN.
+No debe calcular todavía energía ni asumir signos de red o batería.
