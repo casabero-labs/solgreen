@@ -60,7 +60,7 @@ def _make_fired_execution() -> RuleExecution:
         period_end=datetime(2025, 1, 1, 11, 0, tzinfo=UTC),
         parameters_used={"soc_threshold_pct": 20},
         fired=True,
-        evidence=("All required signals present: flow_soc_pct",),
+        evidence=("BAT-001 fired: SOC dropped to 12.5%",),
         input_checksum="abc123",
     )
 

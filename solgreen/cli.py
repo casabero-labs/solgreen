@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 from dataclasses import dataclass
 from datetime import timedelta
 from pathlib import Path
@@ -20,8 +19,13 @@ from solgreen.db import Repository, get_connection
 from solgreen.db.repositories.psycopg2_repo import Psycopg2Repository
 from solgreen.diagnostics.llm_input import LLMEpisodeInput
 from solgreen.diagnostics.llm_provider import LLMProvider, interpret_episode
-from solgreen.diagnostics.rule import RuleExecution
 from solgreen.diagnostics.rule_catalog import RuleCatalog
+from solgreen.diagnostics.rule_evaluation import (
+    RuleEvaluationOutcome,
+    RuleEvaluatorRegistry,
+    eligible_fired_rules,
+    evaluate_rule_catalog,
+)
 from solgreen.importer.detector import detect_format
 from solgreen.importer.exceptions import UnsupportedFormatError
 from solgreen.importer.parsers.base import PLANT_FLOW_COLUMNS
@@ -337,16 +341,27 @@ def _import_with_align(
 
     episodes_built = build_episodes(timeline)
 
+    rule_evaluations: dict[int, tuple[RuleEvaluationOutcome, ...]] = {}
     if repo is not None:
         repo.save_canonical_samples(parsed1.batch.id, timeline)
         catalog = RuleCatalog()
+        registry = RuleEvaluatorRegistry()
         for ep in episodes_built:
             episode_id = repo.save_canonical_episode(parsed1.batch.id, ep)
-            executions = _evaluate_rules(catalog, ep)
-            for execution in executions:
-                repo.save_rule_execution(episode_id, execution)
+            outcomes = evaluate_rule_catalog(catalog, ep, registry)
+            rule_evaluations[episode_id] = outcomes
+            for outcome in outcomes:
+                if outcome.execution is not None:
+                    repo.save_rule_execution(episode_id, outcome.execution)
             if provider is not None:
-                _run_llm_interpretation(provider, plant_id, ep, executions, episode_id, repo)
+                _run_llm_interpretation(
+                    provider,
+                    plant_id,
+                    ep,
+                    outcomes,
+                    episode_id,
+                    repo,
+                )
 
     json_path = output_dir / f"{file1.stem}__{file2.stem}.timeline.json"
     md_path = output_dir / f"{file1.stem}__{file2.stem}.timeline.md"
@@ -359,6 +374,16 @@ def _import_with_align(
     typer.echo(f"  telemetry only: {timeline_summary.telemetry_only_count}")
     typer.echo(f"  coverage: {timeline_summary.coverage_pct:.1f}%")
     typer.echo(f"  episodes: {len(episodes_built)}")
+    if rule_evaluations:
+        evaluated = sum(
+            len([o for o in outcomes if o.execution is not None])
+            for outcomes in rule_evaluations.values()
+        )
+        not_evaluable = sum(
+            len([o for o in outcomes if o.execution is None])
+            for outcomes in rule_evaluations.values()
+        )
+        typer.echo(f"  Rules: {evaluated} evaluated, {not_evaluable} not evaluable")
     if repo is not None:
         typer.echo("  persisted to database")
     if provider is not None:
@@ -384,54 +409,26 @@ def _summarize_timeline(
     )
 
 
-def _evaluate_rules(
-    catalog: RuleCatalog,
-    episode: CanonicalEpisode,
-) -> list[RuleExecution]:
-    executions: list[RuleExecution] = []
-    input_checksum = _episode_checksum(episode)
-
-    for rule in catalog.list_rules():
-        available = {col for col in rule.signals_required if episode.signals.get(col) is not None}
-        fired = len(available) == len(rule.signals_required)
-        evidence: tuple[str, ...] = ()
-        if fired:
-            evidence = (f"All required signals present: {', '.join(rule.signals_required)}",)
-
-        execution = RuleExecution(
-            rule_id=rule.rule_id,
-            rule_version=rule.version,
-            period_start=episode.start,
-            period_end=episode.end,
-            parameters_used=rule.parameters,
-            fired=fired,
-            evidence=evidence,
-            input_checksum=input_checksum,
-        )
-        executions.append(execution)
-
-    return executions
-
-
-def _episode_checksum(episode: CanonicalEpisode) -> str:
-    payload = f"{episode.start.isoformat()}|{episode.end.isoformat()}|{episode.sample_count}"
-    return hashlib.sha256(payload.encode()).hexdigest()
-
-
 def _run_llm_interpretation(
     provider: LLMProvider,
     plant_id: str,
     episode: CanonicalEpisode,
-    executions: list[RuleExecution],
+    outcomes: tuple[RuleEvaluationOutcome, ...],
     episode_id: int,
     repo: Repository,
 ) -> None:
-    fired_rules = tuple(e for e in executions if e.fired)
+    real_executions = tuple(o.execution for o in outcomes if o.execution is not None)
+    eligible = eligible_fired_rules(real_executions)
+
+    if not eligible:
+        typer.echo("    LLM skipped: no validated fired-rule evidence")
+        return
+
     input_data = LLMEpisodeInput(
         plant_id=plant_id,
         episode=episode,
-        fired_rules=fired_rules,
-        data_quality_summary=f"Episode {episode.episode_type}, {episode.sample_count} samples.",
+        fired_rules=eligible,
+        data_quality_summary=(f"Episode {episode.episode_type}, {episode.sample_count} samples."),
     )
     try:
         interpretation = interpret_episode(provider, input_data)
