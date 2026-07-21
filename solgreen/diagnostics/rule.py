@@ -1,11 +1,17 @@
 from __future__ import annotations
 
 from datetime import datetime
+from enum import StrEnum
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from solgreen.diagnostics.severity import SeverityLevel
+
+
+class RuleImplementationStatus(StrEnum):
+    PLANNED = "planned"
+    IMPLEMENTED = "implemented"
 
 
 class Rule(BaseModel):
@@ -36,10 +42,18 @@ class Rule(BaseModel):
         default=(),
         description="Descripciones de falsos positivos conocidos.",
     )
+    implementation_status: RuleImplementationStatus = Field(
+        default=RuleImplementationStatus.PLANNED,
+        description=(
+            "Estado de implementacion. planned = no existe evaluador de "
+            "produccion; implemented = hay un evaluador deterministico "
+            "registrado con tests positivos y negativos."
+        ),
+    )
 
 
 class RuleExecution(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
     rule_id: str = Field(description="ID de la regla evaluada.")
     rule_version: str = Field(description="Versión de la regla evaluada.")
