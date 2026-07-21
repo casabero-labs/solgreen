@@ -246,3 +246,87 @@ class TestInverterStateTextual:
         tel_samples = [_telemetry(ts, potencia_cc_pv1_w=500.0)]
         result = join_by_tolerance(flow_samples, tel_samples)
         assert result[0].telemetry_inverter_state is None
+
+
+class TestGridTelemetrySemantics:
+    def test_merged_prefers_total_active_power_of_the_grid(self) -> None:
+        ts = datetime(2026, 7, 17, 12, 0, tzinfo=UTC)
+        flow_samples = [_flow(ts)]
+        tel_samples = [
+            _telemetry(
+                ts,
+                potencia_total_ca_w=5000.0,
+                total_active_power_of_the_grid_w=800.0,
+            )
+        ]
+        result = join_by_tolerance(flow_samples, tel_samples)
+        assert result[0].source == "merged"
+        assert result[0].telemetry_grid_power_w == 800.0
+
+    def test_telemetry_only_uses_total_active_power_of_the_grid(self) -> None:
+        ts = datetime(2026, 7, 17, 12, 0, tzinfo=UTC)
+        tel_samples = [
+            _telemetry(
+                ts,
+                potencia_total_ca_w=5000.0,
+                total_active_power_of_the_grid_w=800.0,
+            )
+        ]
+        result = join_by_tolerance([], tel_samples)
+        assert result[0].source == "telemetry"
+        assert result[0].telemetry_grid_power_w == 800.0
+
+    def test_grid_power_missing_yields_none_no_fallback(self) -> None:
+        ts = datetime(2026, 7, 17, 12, 0, tzinfo=UTC)
+        tel_samples = [_telemetry(ts, potencia_total_ca_w=5000.0)]
+        result = join_by_tolerance([], tel_samples)
+        assert result[0].telemetry_grid_power_w is None
+
+    def test_grid_power_zero_preserved(self) -> None:
+        ts = datetime(2026, 7, 17, 12, 0, tzinfo=UTC)
+        flow_samples = [_flow(ts)]
+        tel_samples = [
+            _telemetry(
+                ts,
+                total_active_power_of_the_grid_w=0.0,
+            )
+        ]
+        result = join_by_tolerance(flow_samples, tel_samples)
+        assert result[0].telemetry_grid_power_w == 0.0
+
+
+class TestTelemetryOnlyStateSemantics:
+    def test_whitespace_stripped_in_telemetry_only(self) -> None:
+        ts = datetime(2026, 7, 17, 12, 0, tzinfo=UTC)
+        tel_samples = [
+            _telemetry(
+                ts,
+                potencia_cc_pv1_w=500.0,
+                current_state_of_machine=" Waiting ",
+            )
+        ]
+        result = join_by_tolerance([], tel_samples)
+        assert result[0].telemetry_inverter_state == "Waiting"
+
+    def test_numeric_state_yields_none_in_telemetry_only(self) -> None:
+        ts = datetime(2026, 7, 17, 12, 0, tzinfo=UTC)
+        tel_samples = [
+            _telemetry(
+                ts,
+                potencia_cc_pv1_w=500.0,
+                current_state_of_machine=0,
+            )
+        ]
+        result = join_by_tolerance([], tel_samples)
+        assert result[0].telemetry_inverter_state is None
+
+    def test_original_telemetry_sample_not_mutated(self) -> None:
+        ts = datetime(2026, 7, 17, 12, 0, tzinfo=UTC)
+        tel_signals = {
+            "total_active_power_of_the_grid_w": 800.0,
+            "current_state_of_machine": "Standby",
+        }
+        tel_samples = [_telemetry(ts, **tel_signals)]
+        flow_samples = [_flow(ts)]
+        join_by_tolerance(flow_samples, tel_samples)
+        assert tel_samples[0].signals == tel_signals
