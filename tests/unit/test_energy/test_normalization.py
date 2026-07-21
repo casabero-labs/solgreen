@@ -3,6 +3,8 @@ from __future__ import annotations
 import math
 from datetime import UTC, datetime
 
+import pytest
+
 from solgreen.energy.normalization import (
     DirectionalPowerResult,
     NormalizationStatus,
@@ -503,3 +505,181 @@ class TestNormalizationInvariants:
         assert dumped["status"] == "normalized"
         assert "grid_import_w" in json_str
         assert "grid_export_w" in json_str
+
+
+class TestNormalizationPrecedence:
+    def test_field_mismatch_takes_precedence_over_none(self) -> None:
+        reg = PowerSignProfileRegistry()
+        result = normalize_power_value(
+            plant_id="casabero",
+            canonical_field=CanonicalPowerField.FLOW_GRID,
+            source_system=SourceSystem.INVERTER_TELEMETRY,
+            timestamp=_TS,
+            raw_power_w=None,
+            registry=reg,
+        )
+        assert result.status is NormalizationStatus.FIELD_MISMATCH
+
+    def test_field_mismatch_takes_precedence_over_nan(self) -> None:
+        reg = PowerSignProfileRegistry()
+        result = normalize_power_value(
+            plant_id="casabero",
+            canonical_field=CanonicalPowerField.FLOW_GRID,
+            source_system=SourceSystem.INVERTER_TELEMETRY,
+            timestamp=_TS,
+            raw_power_w=float("nan"),
+            registry=reg,
+        )
+        assert result.status is NormalizationStatus.FIELD_MISMATCH
+
+    def test_field_mismatch_takes_precedence_over_finite(self) -> None:
+        reg = PowerSignProfileRegistry()
+        result = normalize_power_value(
+            plant_id="casabero",
+            canonical_field=CanonicalPowerField.FLOW_GRID,
+            source_system=SourceSystem.INVERTER_TELEMETRY,
+            timestamp=_TS,
+            raw_power_w=1500.0,
+            registry=reg,
+        )
+        assert result.status is NormalizationStatus.FIELD_MISMATCH
+
+
+class TestDirectionalPowerResultDomainInvariants:
+    def test_grid_result_with_battery_field_rejected(self) -> None:
+        with pytest.raises(ValueError, match="grid result must not populate battery"):
+            DirectionalPowerResult(
+                canonical_field=CanonicalPowerField.FLOW_GRID,
+                source_system=SourceSystem.SOLARMAN_PLANT_FLOW,
+                authority_class=AuthorityClass.OPERATIONAL,
+                raw_power_w=100.0,
+                status=NormalizationStatus.NORMALIZED,
+                profile_version="1.0.0",
+                profile_status=ProfileStatus.CONFIRMED,
+                grid_import_w=100.0,
+                battery_charge_w=50.0,
+            )
+
+    def test_grid_result_with_pv_field_rejected(self) -> None:
+        with pytest.raises(ValueError, match="grid result must not populate pv"):
+            DirectionalPowerResult(
+                canonical_field=CanonicalPowerField.FLOW_GRID,
+                source_system=SourceSystem.SOLARMAN_PLANT_FLOW,
+                authority_class=AuthorityClass.OPERATIONAL,
+                raw_power_w=100.0,
+                status=NormalizationStatus.NORMALIZED,
+                profile_version="1.0.0",
+                profile_status=ProfileStatus.CONFIRMED,
+                grid_import_w=100.0,
+                pv_generation_w=50.0,
+            )
+
+    def test_battery_result_with_grid_field_rejected(self) -> None:
+        with pytest.raises(ValueError, match="battery result must not populate grid"):
+            DirectionalPowerResult(
+                canonical_field=CanonicalPowerField.FLOW_BATTERY,
+                source_system=SourceSystem.SOLARMAN_PLANT_FLOW,
+                authority_class=AuthorityClass.OPERATIONAL,
+                raw_power_w=100.0,
+                status=NormalizationStatus.NORMALIZED,
+                profile_version="1.0.0",
+                profile_status=ProfileStatus.CONFIRMED,
+                battery_discharge_w=100.0,
+                grid_import_w=50.0,
+            )
+
+    def test_pv_result_with_load_field_rejected(self) -> None:
+        with pytest.raises(ValueError, match="pv result must not populate load"):
+            DirectionalPowerResult(
+                canonical_field=CanonicalPowerField.TELEMETRY_PV,
+                source_system=SourceSystem.INVERTER_TELEMETRY,
+                authority_class=AuthorityClass.OPERATIONAL,
+                raw_power_w=3500.0,
+                status=NormalizationStatus.NORMALIZED,
+                profile_version="1.0.0",
+                profile_status=ProfileStatus.CONFIRMED,
+                pv_generation_w=3500.0,
+                load_consumption_w=100.0,
+            )
+
+    def test_load_result_with_pv_field_rejected(self) -> None:
+        with pytest.raises(ValueError, match="load result must not populate pv"):
+            DirectionalPowerResult(
+                canonical_field=CanonicalPowerField.FLOW_CONSUMO,
+                source_system=SourceSystem.SOLARMAN_PLANT_FLOW,
+                authority_class=AuthorityClass.OPERATIONAL,
+                raw_power_w=1200.0,
+                status=NormalizationStatus.NORMALIZED,
+                profile_version="1.0.0",
+                profile_status=ProfileStatus.CONFIRMED,
+                load_consumption_w=1200.0,
+                pv_generation_w=100.0,
+            )
+
+    def test_normalized_result_without_domain_magnitude_rejected(self) -> None:
+        with pytest.raises(ValueError, match="must have at least one magnitude set"):
+            DirectionalPowerResult(
+                canonical_field=CanonicalPowerField.FLOW_GRID,
+                source_system=SourceSystem.SOLARMAN_PLANT_FLOW,
+                authority_class=AuthorityClass.OPERATIONAL,
+                raw_power_w=100.0,
+                status=NormalizationStatus.NORMALIZED,
+                profile_version="1.0.0",
+                profile_status=ProfileStatus.CONFIRMED,
+            )
+
+    def test_valid_zero_grid_accepted(self) -> None:
+        result = DirectionalPowerResult(
+            canonical_field=CanonicalPowerField.FLOW_GRID,
+            source_system=SourceSystem.SOLARMAN_PLANT_FLOW,
+            authority_class=AuthorityClass.OPERATIONAL,
+            raw_power_w=0.0,
+            status=NormalizationStatus.NORMALIZED,
+            profile_version="1.0.0",
+            profile_status=ProfileStatus.CONFIRMED,
+            grid_import_w=0.0,
+            grid_export_w=0.0,
+        )
+        assert result.grid_import_w == 0.0
+        assert result.grid_export_w == 0.0
+
+    def test_valid_zero_battery_accepted(self) -> None:
+        result = DirectionalPowerResult(
+            canonical_field=CanonicalPowerField.FLOW_BATTERY,
+            source_system=SourceSystem.SOLARMAN_PLANT_FLOW,
+            authority_class=AuthorityClass.OPERATIONAL,
+            raw_power_w=0.0,
+            status=NormalizationStatus.NORMALIZED,
+            profile_version="1.0.0",
+            profile_status=ProfileStatus.CONFIRMED,
+            battery_charge_w=0.0,
+            battery_discharge_w=0.0,
+        )
+        assert result.battery_charge_w == 0.0
+        assert result.battery_discharge_w == 0.0
+
+    def test_valid_zero_pv_accepted(self) -> None:
+        result = DirectionalPowerResult(
+            canonical_field=CanonicalPowerField.TELEMETRY_PV,
+            source_system=SourceSystem.INVERTER_TELEMETRY,
+            authority_class=AuthorityClass.OPERATIONAL,
+            raw_power_w=0.0,
+            status=NormalizationStatus.NORMALIZED,
+            profile_version="1.0.0",
+            profile_status=ProfileStatus.CONFIRMED,
+            pv_generation_w=0.0,
+        )
+        assert result.pv_generation_w == 0.0
+
+    def test_valid_zero_load_accepted(self) -> None:
+        result = DirectionalPowerResult(
+            canonical_field=CanonicalPowerField.FLOW_CONSUMO,
+            source_system=SourceSystem.SOLARMAN_PLANT_FLOW,
+            authority_class=AuthorityClass.OPERATIONAL,
+            raw_power_w=0.0,
+            status=NormalizationStatus.NORMALIZED,
+            profile_version="1.0.0",
+            profile_status=ProfileStatus.CONFIRMED,
+            load_consumption_w=0.0,
+        )
+        assert result.load_consumption_w == 0.0

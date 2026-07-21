@@ -15,6 +15,7 @@ from solgreen.energy.sign_profiles import (
     PowerSignProfileRegistry,
     ProfileStatus,
     SourceSystem,
+    is_power_field_source_compatible,
 )
 
 
@@ -85,6 +86,7 @@ class DirectionalPowerResult(BaseModel):
                 and self.battery_discharge_w > 0
             ):
                 raise ValueError("battery_charge_w and battery_discharge_w cannot both be > 0.")
+            self._validate_domain_consistency()
         else:
             for field_name in (
                 "grid_import_w",
@@ -102,6 +104,79 @@ class DirectionalPowerResult(BaseModel):
                     )
         return self
 
+    def _validate_domain_consistency(self) -> DirectionalPowerResult:
+        field = self.canonical_field
+        grid_fields = {CanonicalPowerField.FLOW_GRID, CanonicalPowerField.TELEMETRY_GRID}
+        battery_fields = {CanonicalPowerField.FLOW_BATTERY, CanonicalPowerField.TELEMETRY_BATTERY}
+        pv_fields = {CanonicalPowerField.FLOW_PRODUCCION, CanonicalPowerField.TELEMETRY_PV}
+        load_fields = {CanonicalPowerField.FLOW_CONSUMO}
+
+        if field in grid_fields:
+            if self.battery_charge_w is not None:
+                raise ValueError("grid result must not populate battery_charge_w.")
+            if self.battery_discharge_w is not None:
+                raise ValueError("grid result must not populate battery_discharge_w.")
+            if self.pv_generation_w is not None:
+                raise ValueError("grid result must not populate pv_generation_w.")
+            if self.load_consumption_w is not None:
+                raise ValueError("grid result must not populate load_consumption_w.")
+            if (
+                self.raw_power_w != 0.0
+                and self.grid_import_w is None
+                and self.grid_export_w is None
+            ):
+                raise ValueError(
+                    "normalized grid result must have at least one magnitude set for non-zero value."
+                )
+        elif field in battery_fields:
+            if self.grid_import_w is not None:
+                raise ValueError("battery result must not populate grid_import_w.")
+            if self.grid_export_w is not None:
+                raise ValueError("battery result must not populate grid_export_w.")
+            if self.pv_generation_w is not None:
+                raise ValueError("battery result must not populate pv_generation_w.")
+            if self.load_consumption_w is not None:
+                raise ValueError("battery result must not populate load_consumption_w.")
+            if (
+                self.raw_power_w != 0.0
+                and self.battery_charge_w is None
+                and self.battery_discharge_w is None
+            ):
+                raise ValueError(
+                    "normalized battery result must have at least one magnitude set for non-zero value."
+                )
+        elif field in pv_fields:
+            if self.grid_import_w is not None:
+                raise ValueError("pv result must not populate grid_import_w.")
+            if self.grid_export_w is not None:
+                raise ValueError("pv result must not populate grid_export_w.")
+            if self.battery_charge_w is not None:
+                raise ValueError("pv result must not populate battery_charge_w.")
+            if self.battery_discharge_w is not None:
+                raise ValueError("pv result must not populate battery_discharge_w.")
+            if self.load_consumption_w is not None:
+                raise ValueError("pv result must not populate load_consumption_w.")
+            if self.pv_generation_w is None and self.raw_power_w != 0.0:
+                raise ValueError(
+                    "normalized pv result must have pv_generation_w set for non-zero value."
+                )
+        elif field in load_fields:
+            if self.grid_import_w is not None:
+                raise ValueError("load result must not populate grid_import_w.")
+            if self.grid_export_w is not None:
+                raise ValueError("load result must not populate grid_export_w.")
+            if self.battery_charge_w is not None:
+                raise ValueError("load result must not populate battery_charge_w.")
+            if self.battery_discharge_w is not None:
+                raise ValueError("load result must not populate battery_discharge_w.")
+            if self.pv_generation_w is not None:
+                raise ValueError("load result must not populate pv_generation_w.")
+            if self.load_consumption_w is None and self.raw_power_w != 0.0:
+                raise ValueError(
+                    "normalized load result must have load_consumption_w set for non-zero value."
+                )
+        return self
+
 
 def normalize_power_value(
     *,
@@ -112,6 +187,15 @@ def normalize_power_value(
     raw_power_w: float | None,
     registry: PowerSignProfileRegistry,
 ) -> DirectionalPowerResult:
+    if not is_power_field_source_compatible(canonical_field, source_system):
+        return DirectionalPowerResult(
+            canonical_field=canonical_field,
+            source_system=source_system,
+            authority_class=AuthorityClass.OPERATIONAL,
+            raw_power_w=raw_power_w,
+            status=NormalizationStatus.FIELD_MISMATCH,
+        )
+
     if raw_power_w is None:
         return DirectionalPowerResult(
             canonical_field=canonical_field,
@@ -172,6 +256,16 @@ def _apply_profile(
     profile: PowerSignProfile,
     raw_power_w: float,
 ) -> DirectionalPowerResult:
+    if profile.canonical_field != canonical_field:
+        raise ValueError(
+            f"Internal error: profile field mismatch. "
+            f"Expected {canonical_field}, got {profile.canonical_field}."
+        )
+    if profile.source_system != source_system:
+        raise ValueError(
+            f"Internal error: profile source mismatch. "
+            f"Expected {source_system}, got {profile.source_system}."
+        )
     if canonical_field in (
         CanonicalPowerField.FLOW_GRID,
         CanonicalPowerField.TELEMETRY_GRID,
