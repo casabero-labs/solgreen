@@ -170,6 +170,7 @@ class PowerSignProfile(BaseModel):
     positive_means: PowerDirection
     negative_means: PowerDirection
     zero_means: PowerDirection = PowerDirection.NO_FLOW
+    zero_deadband_w: float = Field(ge=0.0, default=0.0)
     status: ProfileStatus
     evidence_refs: tuple[str, ...] = Field(default=())
     profile_version: str = Field(min_length=1)

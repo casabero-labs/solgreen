@@ -1,4 +1,6 @@
 from solgreen.energy.evidence import (
+    SIGN_ZERO_DEADBAND_W,
+    classify_power_value,
     cumulative_delta,
     decide_signed_signal,
     decide_unsigned_signal,
@@ -16,6 +18,7 @@ from solgreen.energy.normalization import (
     NormalizationStatus,
     normalize_power_value,
 )
+from solgreen.energy.registry_seeds import build_telemetry_sign_profile_registry
 from solgreen.energy.sign_profiles import (
     AuthorityClass,
     CanonicalPowerField,
@@ -31,6 +34,7 @@ from solgreen.energy.sign_profiles import (
 )
 
 __all__ = [
+    "SIGN_ZERO_DEADBAND_W",
     "AuthorityClass",
     "CanonicalPowerField",
     "DirectionalPowerResult",
@@ -41,6 +45,8 @@ __all__ = [
     "ProfileStatus",
     "SourceSystem",
     "build_production_sign_profile_registry",
+    "build_telemetry_sign_profile_registry",
+    "classify_power_value",
     "cumulative_delta",
     "decide_signed_signal",
     "decide_unsigned_signal",

@@ -16,6 +16,31 @@ import statistics
 from datetime import datetime
 from typing import Any
 
+SIGN_ZERO_DEADBAND_W = 5.0
+
+
+def classify_power_value(
+    raw_value: float,
+    zero_deadband_w: float = 0.0,
+) -> tuple[float, str, str]:
+    """
+    Classify a raw power value using a symmetric deadband.
+
+    Returns (normalized_value, classification, reason) where:
+    - normalized_value: the raw value (never modified)
+    - classification: "positive" | "negative" | "zero"
+    - reason: "positive_outside_deadband" | "negative_outside_deadband" | "within_zero_deadband"
+
+    The raw value is NEVER modified — only classified.
+    """
+    if raw_value > zero_deadband_w:
+        return (raw_value, "positive", "positive_outside_deadband")
+    elif raw_value < -zero_deadband_w:
+        return (raw_value, "negative", "negative_outside_deadband")
+    else:
+        return (raw_value, "zero", "within_zero_deadband")
+
+
 # ---------------------------------------------------------------------------
 # Statistics
 # ---------------------------------------------------------------------------
@@ -41,15 +66,32 @@ def safe_stats(values: list[float]) -> dict[str, float | None]:
 
 def directional_split(
     values: list[float],
+    *,
+    zero_deadband_w: float = 0.0,
 ) -> dict[str, Any]:
-    """Separate values into positive, negative, and zero groups with stats."""
-    pos = [v for v in values if v > 0]
-    neg = [v for v in values if v < 0]
-    zero_count = sum(1 for v in values if v == 0.0)
+    """
+    Separate values into positive, negative, and zero groups with stats.
+
+    When zero_deadband_w > 0, values in [-deadband, +deadband] are classified as zero.
+    Raw values are never modified; classification is based on the deadband threshold.
+    """
+    pos: list[float] = []
+    neg: list[float] = []
+    zero: list[float] = []
+    for v in values:
+        classification = classify_power_value(v, zero_deadband_w)
+        bucket = classification[1]
+        if bucket == "positive":
+            pos.append(v)
+        elif bucket == "negative":
+            neg.append(v)
+        else:
+            zero.append(v)
     return {
         "positive": safe_stats(pos),
         "negative": safe_stats(neg),
-        "zero_count": zero_count,
+        "zero_count": len(zero),
+        "deadband_applied_w": zero_deadband_w,
     }
 
 
@@ -83,6 +125,7 @@ def detect_episodes(
     timestamped_values: list[tuple[datetime, float]],
     *,
     min_consecutive: int = 2,
+    zero_deadband_w: float = 0.0,
 ) -> list[dict[str, Any]]:
     """
     Group consecutive same-sign values into episodes.
@@ -91,9 +134,13 @@ def detect_episodes(
     Only episodes with at least `min_consecutive` samples are returned.
     Episodes with sign=zero are excluded.
 
+    When zero_deadband_w > 0, values in [-deadband, +deadband] are classified
+    as zero and cannot start episodes. Raw values are never modified.
+
     Returns list of dicts with:
         direction, start_iso, end_iso, duration_samples,
-        magnitude_min, magnitude_max, magnitude_median, sign_consistency
+        magnitude_min, magnitude_max, magnitude_median, sign_consistency,
+        deadband_applied_w
     """
     if len(timestamped_values) < min_consecutive:
         return []
@@ -105,12 +152,7 @@ def detect_episodes(
     current_values: list[float] = []
 
     for ts, val in timestamped_values:
-        if val > 0:
-            direction = "positive"
-        elif val < 0:
-            direction = "negative"
-        else:
-            direction = "zero"
+        _, direction, _ = classify_power_value(val, zero_deadband_w)
 
         if direction != current_dir:
             if (
@@ -119,7 +161,9 @@ def detect_episodes(
                 and len(current_values) >= min_consecutive
             ):
                 episodes.append(
-                    _build_episode(current_dir, current_values, current_start, current_end)
+                    _build_episode(
+                        current_dir, current_values, current_start, current_end, zero_deadband_w
+                    )
                 )
             current_dir = direction
             current_start = ts
@@ -132,7 +176,9 @@ def detect_episodes(
     if current_dir is not None and current_dir != "zero" and len(current_values) >= min_consecutive:
         assert current_start is not None
         assert current_end is not None
-        episodes.append(_build_episode(current_dir, current_values, current_start, current_end))
+        episodes.append(
+            _build_episode(current_dir, current_values, current_start, current_end, zero_deadband_w)
+        )
 
     return episodes
 
@@ -142,6 +188,7 @@ def _build_episode(
     values: list[float],
     start: datetime | None,
     end: datetime | None,
+    deadband_applied_w: float = 0.0,
 ) -> dict[str, Any]:
     abs_vals = [abs(v) for v in values]
     return {
@@ -153,6 +200,7 @@ def _build_episode(
         "magnitude_max": round(max(abs_vals), 2),
         "magnitude_median": round(statistics.median(abs_vals), 2),
         "sign_consistency": sign_consistency(values),
+        "deadband_applied_w": deadband_applied_w,
     }
 
 
@@ -304,11 +352,19 @@ def decide_unsigned_signal(
     positive_count: int = 0,
     negative_count: int = 0,
     positive_episodes: int = 0,
+    *,
+    signal_name: str = "unknown",
 ) -> tuple[DecisionOutcome, str, str]:
     """Determine evidence decision for unsigned signals like PV and load."""
     if negative_count > 0:
         return "contradicted", f"{negative_count} negative values in unsigned signal", "high"
     if positive_episodes > 0:
+        if signal_name == "load":
+            return (
+                "confirmed_after_deadband_validation",
+                f"{positive_episodes} positive episodes, no negatives outside deadband",
+                "high",
+            )
         return (
             "provisional",
             f"{positive_episodes} positive episodes, {negative_count} negatives",

@@ -9,6 +9,8 @@ from pathlib import Path
 import pytest
 
 from solgreen.energy.evidence import (
+    SIGN_ZERO_DEADBAND_W,
+    classify_power_value,
     cumulative_delta,
     decide_signed_signal,
     decide_unsigned_signal,
@@ -619,3 +621,303 @@ class TestZeroValues:
         values = [(_t(i), 0.0) for i in range(3)]
         episodes = detect_episodes(values, min_consecutive=2)
         assert len(episodes) == 0
+
+
+# ---------------------------------------------------------------------------
+# Deadband — classify_power_value
+# ---------------------------------------------------------------------------
+
+
+class TestClassifyPowerValue:
+    def test_positive_outside_deadband(self) -> None:
+        raw, classification, reason = classify_power_value(6.0, zero_deadband_w=5.0)
+        assert raw == 6.0
+        assert classification == "positive"
+        assert reason == "positive_outside_deadband"
+
+    def test_negative_outside_deadband(self) -> None:
+        raw, classification, reason = classify_power_value(-6.0, zero_deadband_w=5.0)
+        assert raw == -6.0
+        assert classification == "negative"
+        assert reason == "negative_outside_deadband"
+
+    def test_within_deadband_positive(self) -> None:
+        raw, classification, reason = classify_power_value(2.0, zero_deadband_w=5.0)
+        assert raw == 2.0
+        assert classification == "zero"
+        assert reason == "within_zero_deadband"
+
+    def test_within_deadband_negative(self) -> None:
+        raw, classification, reason = classify_power_value(-2.0, zero_deadband_w=5.0)
+        assert raw == -2.0
+        assert classification == "zero"
+        assert reason == "within_zero_deadband"
+
+    def test_exactly_positive_deadband(self) -> None:
+        raw, classification, reason = classify_power_value(5.0, zero_deadband_w=5.0)
+        assert raw == 5.0
+        assert classification == "zero"
+        assert reason == "within_zero_deadband"
+
+    def test_exactly_negative_deadband(self) -> None:
+        raw, classification, reason = classify_power_value(-5.0, zero_deadband_w=5.0)
+        assert raw == -5.0
+        assert classification == "zero"
+        assert reason == "within_zero_deadband"
+
+    def test_exactly_zero(self) -> None:
+        raw, classification, reason = classify_power_value(0.0, zero_deadband_w=5.0)
+        assert raw == 0.0
+        assert classification == "zero"
+        assert reason == "within_zero_deadband"
+
+    def test_just_outside_positive_deadband(self) -> None:
+        raw, classification, reason = classify_power_value(5.01, zero_deadband_w=5.0)
+        assert raw == 5.01
+        assert classification == "positive"
+        assert reason == "positive_outside_deadband"
+
+    def test_just_outside_negative_deadband(self) -> None:
+        raw, classification, reason = classify_power_value(-5.01, zero_deadband_w=5.0)
+        assert raw == -5.01
+        assert classification == "negative"
+        assert reason == "negative_outside_deadband"
+
+    def test_zero_deadband_disabled(self) -> None:
+        raw, classification, reason = classify_power_value(0.0, zero_deadband_w=0.0)
+        assert raw == 0.0
+        assert classification == "zero"
+        assert reason == "within_zero_deadband"
+
+    def test_small_positive_with_zero_deadband(self) -> None:
+        raw, classification, reason = classify_power_value(0.001, zero_deadband_w=0.0)
+        assert raw == 0.001
+        assert classification == "positive"
+        assert reason == "positive_outside_deadband"
+
+    def test_raw_value_never_modified(self) -> None:
+        raw_val = -2.0
+        raw, _, _ = classify_power_value(raw_val, zero_deadband_w=5.0)
+        assert raw == -2.0
+        assert raw_val == -2.0
+
+
+# ---------------------------------------------------------------------------
+# Deadband — directional_split
+# ---------------------------------------------------------------------------
+
+
+class TestDirectionalSplitWithDeadband:
+    def test_default_deadband_zero(self) -> None:
+        result = directional_split([10.0, -5.0, 0.0])
+        assert result["positive"]["count"] == 1
+        assert result["negative"]["count"] == 1
+        assert result["zero_count"] == 1
+        assert result["deadband_applied_w"] == 0.0
+
+    def test_deadband_reclassifies_small_positive(self) -> None:
+        result = directional_split([3.0], zero_deadband_w=5.0)
+        assert result["positive"]["count"] == 0
+        assert result["zero_count"] == 1
+        assert result["deadband_applied_w"] == 5.0
+
+    def test_deadband_reclassifies_small_negative(self) -> None:
+        result = directional_split([-3.0], zero_deadband_w=5.0)
+        assert result["negative"]["count"] == 0
+        assert result["zero_count"] == 1
+        assert result["deadband_applied_w"] == 5.0
+
+    def test_deadband_large_positive_unchanged(self) -> None:
+        result = directional_split([10.0], zero_deadband_w=5.0)
+        assert result["positive"]["count"] == 1
+        assert result["negative"]["count"] == 0
+        assert result["zero_count"] == 0
+
+    def test_deadband_large_negative_unchanged(self) -> None:
+        result = directional_split([-10.0], zero_deadband_w=5.0)
+        assert result["negative"]["count"] == 1
+        assert result["positive"]["count"] == 0
+        assert result["zero_count"] == 0
+
+    def test_deadband_mixed(self) -> None:
+        result = directional_split([10.0, 3.0, -3.0, -10.0, 0.0], zero_deadband_w=5.0)
+        assert result["positive"]["count"] == 1
+        assert result["negative"]["count"] == 1
+        assert result["zero_count"] == 3
+
+    def test_deadband_custom(self) -> None:
+        result = directional_split([1.0, -1.0, 10.0, -10.0], zero_deadband_w=2.0)
+        assert result["positive"]["count"] == 1
+        assert result["negative"]["count"] == 1
+        assert result["zero_count"] == 2
+
+    def test_constant_exported(self) -> None:
+        result = directional_split([10.0], zero_deadband_w=5.0)
+        assert "deadband_applied_w" in result
+
+
+# ---------------------------------------------------------------------------
+# Deadband — detect_episodes
+# ---------------------------------------------------------------------------
+
+
+class TestDetectEpisodesWithDeadband:
+    def test_small_values_do_not_start_episodes(self) -> None:
+        values = [(_t(0), 3.0), (_t(1), 3.0), (_t(2), 10.0), (_t(3), 10.0)]
+        episodes = detect_episodes(values, min_consecutive=2, zero_deadband_w=5.0)
+        assert len(episodes) == 1
+        assert episodes[0]["direction"] == "positive"
+
+    def test_deadband_in_episode_output(self) -> None:
+        values = [(_t(0), 10.0), (_t(1), 10.0)]
+        episodes = detect_episodes(values, min_consecutive=2, zero_deadband_w=5.0)
+        assert episodes[0]["deadband_applied_w"] == 5.0
+
+    def test_default_deadband_zero(self) -> None:
+        values = [(_t(0), 10.0), (_t(1), 10.0)]
+        episodes = detect_episodes(values, min_consecutive=2)
+        assert episodes[0]["deadband_applied_w"] == 0.0
+
+    def test_small_negative_do_not_start_episodes(self) -> None:
+        values = [(_t(0), -3.0), (_t(1), -3.0), (_t(2), -10.0), (_t(3), -10.0)]
+        episodes = detect_episodes(values, min_consecutive=2, zero_deadband_w=5.0)
+        assert len(episodes) == 1
+        assert episodes[0]["direction"] == "negative"
+
+    def test_boundary_positive_starts_episode(self) -> None:
+        values = [(_t(0), 5.01), (_t(1), 5.01)]
+        episodes = detect_episodes(values, min_consecutive=2, zero_deadband_w=5.0)
+        assert len(episodes) == 1
+        assert episodes[0]["direction"] == "positive"
+
+    def test_boundary_negative_starts_episode(self) -> None:
+        values = [(_t(0), -5.01), (_t(1), -5.01)]
+        episodes = detect_episodes(values, min_consecutive=2, zero_deadband_w=5.0)
+        assert len(episodes) == 1
+        assert episodes[0]["direction"] == "negative"
+
+    def test_boundary_zero_does_not_start_episode(self) -> None:
+        values = [(_t(0), 5.0), (_t(1), 5.0)]
+        episodes = detect_episodes(values, min_consecutive=2, zero_deadband_w=5.0)
+        assert len(episodes) == 0
+
+
+# ---------------------------------------------------------------------------
+# Deadband — decide_unsigned_signal
+# ---------------------------------------------------------------------------
+
+
+class TestDecideUnsignedWithDeadband:
+    def test_load_confirmed_after_deadband_validation(self) -> None:
+        outcome, _, confidence = decide_unsigned_signal(
+            negative_count=0,
+            positive_episodes=5,
+            signal_name="load",
+        )
+        assert outcome == "confirmed_after_deadband_validation"
+        assert confidence == "high"
+
+    def test_pv_provisional_no_negatives(self) -> None:
+        outcome, _, _ = decide_unsigned_signal(
+            negative_count=0,
+            positive_episodes=5,
+            signal_name="pv",
+        )
+        assert outcome == "provisional"
+
+    def test_contradicted_when_negatives_exist(self) -> None:
+        outcome, _, _ = decide_unsigned_signal(
+            negative_count=1,
+            positive_episodes=5,
+            signal_name="load",
+        )
+        assert outcome == "contradicted"
+
+
+# ---------------------------------------------------------------------------
+# Sign profile registry — separation of concerns
+# ---------------------------------------------------------------------------
+
+
+class TestSignProfileSeparation:
+    def test_flow_and_telemetry_profiles_are_independent(self) -> None:
+        from solgreen.energy.sign_profiles import (
+            CanonicalPowerField,
+            SourceSystem,
+        )
+
+        assert SourceSystem.SOLARMAN_PLANT_FLOW != SourceSystem.INVERTER_TELEMETRY
+        flow_battery = CanonicalPowerField.FLOW_BATTERY
+        tel_battery = CanonicalPowerField.TELEMETRY_BATTERY
+        assert flow_battery != tel_battery
+
+    def test_zero_deadband_field_exists(self) -> None:
+        from datetime import UTC
+
+        from solgreen.energy.sign_profiles import (
+            AuthorityClass,
+            CanonicalPowerField,
+            PowerDirection,
+            PowerSignProfile,
+            ProfileStatus,
+            SourceSystem,
+        )
+
+        profile = PowerSignProfile(
+            plant_id="test-plant",
+            canonical_field=CanonicalPowerField.TELEMETRY_BATTERY,
+            source_system=SourceSystem.INVERTER_TELEMETRY,
+            authority_class=AuthorityClass.OPERATIONAL,
+            measurement_point="test-point",
+            unit="W",
+            positive_means=PowerDirection.BATTERY_DISCHARGE,
+            negative_means=PowerDirection.BATTERY_CHARGE,
+            zero_means=PowerDirection.NO_FLOW,
+            zero_deadband_w=5.0,
+            status=ProfileStatus.CONFIRMED,
+            evidence_refs=("test-ref",),
+            profile_version="1.0.0",
+            valid_from=datetime(2026, 7, 1, tzinfo=UTC),
+        )
+        assert profile.zero_deadband_w == 5.0
+
+    def test_rejects_profiles_without_approval(self) -> None:
+        from datetime import UTC
+
+        from solgreen.energy.sign_profiles import (
+            AuthorityClass,
+            CanonicalPowerField,
+            PowerDirection,
+            PowerSignProfile,
+            ProfileStatus,
+            SourceSystem,
+        )
+
+        profile = PowerSignProfile(
+            plant_id="test-plant",
+            canonical_field=CanonicalPowerField.TELEMETRY_BATTERY,
+            source_system=SourceSystem.INVERTER_TELEMETRY,
+            authority_class=AuthorityClass.OPERATIONAL,
+            measurement_point="test-point",
+            unit="W",
+            positive_means=PowerDirection.UNKNOWN,
+            negative_means=PowerDirection.UNKNOWN,
+            zero_means=PowerDirection.NO_FLOW,
+            status=ProfileStatus.UNKNOWN,
+            profile_version="1.0.0",
+            valid_from=datetime(2026, 7, 1, tzinfo=UTC),
+        )
+        assert profile.status == ProfileStatus.UNKNOWN
+
+
+# ---------------------------------------------------------------------------
+# SIGN_ZERO_DEADBAND_W constant
+# ---------------------------------------------------------------------------
+
+
+class TestDeadbandConstant:
+    def test_default_deadband_is_5(self) -> None:
+        assert SIGN_ZERO_DEADBAND_W == 5.0
+
+    def test_deadband_non_negative(self) -> None:
+        assert SIGN_ZERO_DEADBAND_W >= 0
