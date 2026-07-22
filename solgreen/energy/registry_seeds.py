@@ -137,11 +137,11 @@ def build_telemetry_sign_profile_registry() -> PowerSignProfileRegistry:
             profile_version="u2_1b.1-telemetry",
             valid_from=datetime(2026, 7, 1, tzinfo=UTC),
             notes=(
-                "Owner-approved after deadband validation: "
-                "single -2.0 W value classified as technical zero (±5 W deadband). "
-                "No values below -5 W found. "
-                "Flow source — NOT derived from telemetry conventions. "
-                "This profile uses flow canonical field but references telemetry approval."
+                "Owner-approved: single -2.0 W value within ±5 W deadband "
+                "classified as technical zero. No values below -5 W found. "
+                "status=confirmed; validation_method=deadband; validation_result=passed. "
+                "Uses flow canonical field (no telemetry load field exists in schema). "
+                "Flow profiles are otherwise pending independent assessment."
             ),
         )
     )

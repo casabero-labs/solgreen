@@ -808,13 +808,14 @@ class TestDetectEpisodesWithDeadband:
 
 
 class TestDecideUnsignedWithDeadband:
-    def test_load_confirmed_after_deadband_validation(self) -> None:
-        outcome, _, confidence = decide_unsigned_signal(
+    def test_load_confirmed_with_deadband_metadata(self) -> None:
+        outcome, reason, confidence = decide_unsigned_signal(
             negative_count=0,
             positive_episodes=5,
             signal_name="load",
         )
-        assert outcome == "confirmed_after_deadband_validation"
+        assert outcome == "confirmed"
+        assert "no negatives outside deadband" in reason
         assert confidence == "high"
 
     def test_pv_provisional_no_negatives(self) -> None:
@@ -908,6 +909,47 @@ class TestSignProfileSeparation:
             valid_from=datetime(2026, 7, 1, tzinfo=UTC),
         )
         assert profile.status == ProfileStatus.UNKNOWN
+
+    def test_telemetry_registry_contains_exactly_four_profiles(self) -> None:
+        from solgreen.energy.registry_seeds import build_telemetry_sign_profile_registry
+
+        registry = build_telemetry_sign_profile_registry()
+        profiles = registry.profiles
+        assert len(profiles) == 4
+
+    def test_telemetry_battery_grid_pv_profiles_use_telemetry_source(self) -> None:
+        from solgreen.energy.registry_seeds import build_telemetry_sign_profile_registry
+        from solgreen.energy.sign_profiles import CanonicalPowerField, SourceSystem
+
+        registry = build_telemetry_sign_profile_registry()
+        for profile in registry.profiles:
+            if profile.canonical_field in {
+                CanonicalPowerField.TELEMETRY_BATTERY,
+                CanonicalPowerField.TELEMETRY_GRID,
+                CanonicalPowerField.TELEMETRY_PV,
+            }:
+                assert profile.source_system == SourceSystem.INVERTER_TELEMETRY
+
+    def test_telemetry_registry_no_flow_battery_grid_pv_fields(self) -> None:
+        from solgreen.energy.registry_seeds import build_telemetry_sign_profile_registry
+        from solgreen.energy.sign_profiles import CanonicalPowerField
+
+        registry = build_telemetry_sign_profile_registry()
+        flow_fields = {
+            CanonicalPowerField.FLOW_BATTERY,
+            CanonicalPowerField.FLOW_GRID,
+            CanonicalPowerField.FLOW_PRODUCCION,
+        }
+        for profile in registry.profiles:
+            assert profile.canonical_field not in flow_fields
+
+    def test_telemetry_registry_has_load_profile(self) -> None:
+        from solgreen.energy.registry_seeds import build_telemetry_sign_profile_registry
+        from solgreen.energy.sign_profiles import CanonicalPowerField
+
+        registry = build_telemetry_sign_profile_registry()
+        canonical_fields = {p.canonical_field for p in registry.profiles}
+        assert CanonicalPowerField.FLOW_CONSUMO in canonical_fields
 
 
 # ---------------------------------------------------------------------------

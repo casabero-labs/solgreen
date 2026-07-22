@@ -361,7 +361,7 @@ def decide_unsigned_signal(
     if positive_episodes > 0:
         if signal_name == "load":
             return (
-                "confirmed_after_deadband_validation",
+                "confirmed",
                 f"{positive_episodes} positive episodes, no negatives outside deadband",
                 "high",
             )
