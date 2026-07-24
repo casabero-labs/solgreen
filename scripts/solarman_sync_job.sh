@@ -128,8 +128,9 @@ set -e
 if [[ $EXIT_CODE -eq 0 ]]; then
     STATUS=$(echo "$OUTPUT" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('status', d.get('ok', 'UNKNOWN')))" 2>/dev/null || echo "SUCCESS")
     if [[ "$STATUS" == "SKIPPED_LOCKED" ]]; then
-        log "Sync skipped: lock busy (another sync running)"
-        exit 2
+        log "Sync skipped: lock busy (another sync running); no API call made"
+        echo "$OUTPUT"
+        exit 0
     fi
     log "Sync complete: $STATUS"
     echo "$OUTPUT"

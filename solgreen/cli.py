@@ -533,6 +533,7 @@ def deploy_schema(
     finally:
         conn.close()
 
+
 @db_app.command("status")
 def db_status(
     db_url: Annotated[
@@ -572,8 +573,7 @@ def db_status(
             output = {
                 "ok": True,
                 "applied": [
-                    {"version": m.version, "name": m.name, "checksum": m.checksum}
-                    for m in applied
+                    {"version": m.version, "name": m.name, "checksum": m.checksum} for m in applied
                 ],
                 "pending": [{"version": m.version, "name": m.name} for m in pending],
             }
@@ -643,13 +643,17 @@ def db_migrate(
             else:
                 pending_to_apply = pending_dr
             if json_output:
-                typer.echo(json.dumps({
-                    "ok": True,
-                    "dry_run": True,
-                    "would_apply": [
-                        {"version": m.version, "name": m.name} for m in pending_to_apply
-                    ],
-                }))
+                typer.echo(
+                    json.dumps(
+                        {
+                            "ok": True,
+                            "dry_run": True,
+                            "would_apply": [
+                                {"version": m.version, "name": m.name} for m in pending_to_apply
+                            ],
+                        }
+                    )
+                )
             else:
                 if not pending_to_apply:
                     typer.echo("No migrations to apply.")
@@ -661,12 +665,16 @@ def db_migrate(
 
         applied_migrations: list[MigrationFile] = runner.apply(migrations_dir, target_version)
         if json_output:
-            typer.echo(json.dumps({
-                "ok": True,
-                "applied": [
-                    {"version": m.version, "name": m.name} for m in applied_migrations
-                ],
-            }))
+            typer.echo(
+                json.dumps(
+                    {
+                        "ok": True,
+                        "applied": [
+                            {"version": m.version, "name": m.name} for m in applied_migrations
+                        ],
+                    }
+                )
+            )
         else:
             if not applied_migrations:
                 typer.echo("No new migrations to apply.")
@@ -789,7 +797,9 @@ def solarman_doctor(
         typer.echo(json.dumps(output, indent=2))
     else:
         summary = result.to_dict()["summary"]
-        typer.echo(f"\nSOLARMAN Doctor — {summary['total']} checks, {summary['pass']} PASS, {summary['warn']} WARN, {summary['fail']} FAIL\n")
+        typer.echo(
+            f"\nSOLARMAN Doctor — {summary['total']} checks, {summary['pass']} PASS, {summary['warn']} WARN, {summary['fail']} FAIL\n"
+        )
         for check in result.checks:
             icon = {"PASS": "✓", "WARN": "⚠", "FAIL": "✗"}[check.status.value]
             typer.echo(f"  {icon} [{check.status.value}] {check.name}")
@@ -870,14 +880,18 @@ def solarman_sync(
 
     if dry_run:
         if json_output:
-            typer.echo(json.dumps({
-                "ok": True,
-                "dry_run": True,
-                "station_id": station_id,
-                "plant_id": plant_id,
-                "would_sync": True,
-                "message": "Dry-run: would sync station if lock acquired and API responds.",
-            }))
+            typer.echo(
+                json.dumps(
+                    {
+                        "ok": True,
+                        "dry_run": True,
+                        "station_id": station_id,
+                        "plant_id": plant_id,
+                        "would_sync": True,
+                        "message": "Dry-run: would sync station if lock acquired and API responds.",
+                    }
+                )
+            )
         else:
             typer.echo(f"[DRY-RUN] Station: {station_id}")
             typer.echo(f"[DRY-RUN] Plant: {plant_id}")
@@ -892,17 +906,26 @@ def solarman_sync(
             lock, lock_status = acquire_sync_lock(conn, plant_id, station_id)
             if lock_status != LockStatus.ACQUIRED:
                 if json_output:
-                    typer.echo(json.dumps({
-                        "ok": False,
-                        "skipped_locked": True,
-                        "station_id": station_id,
-                        "plant_id": plant_id,
-                    }))
+                    typer.echo(
+                        json.dumps(
+                            {
+                                "ok": True,
+                                "status": "SKIPPED_LOCKED",
+                                "skipped_locked": True,
+                                "station_id": station_id,
+                                "plant_id": plant_id,
+                                "warning": "Another sync is running for this station; no API call made.",
+                            }
+                        )
+                    )
                 else:
-                    typer.echo("[SKIPPED_LOCKED] Another sync is running for this station.", err=True)
+                    typer.echo(
+                        "[SKIPPED_LOCKED] Another sync is running for this station; no API call made.",
+                        err=True,
+                    )
                 if conn:
                     conn.close()
-                raise typer.Exit(code=2)
+                raise typer.Exit(code=0)
 
     try:
         result = sync_solarman_station(

@@ -285,6 +285,7 @@ def _check_database(result: DoctorResult, db_url: str | None) -> None:
         return
     try:
         import psycopg2
+
         conn = psycopg2.connect(db_url)
         with conn.cursor() as cur:
             cur.execute("SELECT 1")
@@ -296,6 +297,7 @@ def _check_database(result: DoctorResult, db_url: str | None) -> None:
 
 def _check_database_conn(db_url: str) -> Any:
     import psycopg2
+
     try:
         return psycopg2.connect(db_url)
     except Exception:
@@ -316,6 +318,7 @@ def _check_migrations_with_conn(result: DoctorResult, conn: Any) -> None:
             return
 
         from solgreen.db.migrations.runner import get_migration_runner
+
         runner = get_migration_runner(conn)
         applied, pending = runner.status()
         if pending:

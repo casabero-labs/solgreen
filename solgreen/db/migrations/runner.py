@@ -9,7 +9,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-MIGRATION_PATTERN = re.compile(r"^(\d{3,})_(.+)\.sql$")
+MIGRATION_PATTERN = re.compile(r"^(\d{3,})_(.+)$")
 
 
 @dataclass(frozen=True)

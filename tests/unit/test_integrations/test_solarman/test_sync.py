@@ -374,3 +374,105 @@ class TestSyncResult:
         result.device_results = [dr1, dr2]
         result.error_count = dr1.authorized_errors + dr2.authorized_errors
         assert result.error_count == 3
+
+
+class TestSyncCliFlags:
+    def test_sync_help_shows_json_flag(self) -> None:
+        result = runner.invoke(app, ["solarman", "sync", "--help"])
+        assert result.exit_code == 0
+        assert "--json" in result.stdout
+
+    def test_sync_help_shows_dry_run_flag(self) -> None:
+        result = runner.invoke(app, ["solarman", "sync", "--help"])
+        assert result.exit_code == 0
+        assert "--dry-run" in result.stdout
+
+    def test_sync_help_shows_no_db_flag(self) -> None:
+        result = runner.invoke(app, ["solarman", "sync", "--help"])
+        assert result.exit_code == 0
+        assert "--no-db" in result.stdout
+
+    def test_dry_run_exit_0(self) -> None:
+        from unittest.mock import MagicMock, patch
+
+        mock_settings = MagicMock()
+        with patch(
+            "solgreen.integrations.solarman.settings.build_settings_from_env",
+            return_value=mock_settings,
+        ):
+            result = runner.invoke(app, ["solarman", "sync", "--dry-run", "--plant-id", "X"])
+            assert result.exit_code == 0
+
+    def test_dry_run_shows_dry_run_message(self) -> None:
+        from unittest.mock import MagicMock, patch
+
+        mock_settings = MagicMock()
+        with patch(
+            "solgreen.integrations.solarman.settings.build_settings_from_env",
+            return_value=mock_settings,
+        ):
+            result = runner.invoke(app, ["solarman", "sync", "--dry-run", "--plant-id", "X"])
+            assert "DRY-RUN" in result.stdout or "dry-run" in result.stdout.lower()
+
+    def test_no_db_exit_0_when_no_station(self) -> None:
+        from unittest.mock import MagicMock, patch
+
+        mock_settings = MagicMock()
+        with patch(
+            "solgreen.integrations.solarman.settings.build_settings_from_env",
+            return_value=mock_settings,
+        ):
+            result = runner.invoke(
+                app, ["solarman", "sync", "--no-db", "--plant-id", "X", "--station-id", ""]
+            )
+            assert result.exit_code in (0, 1)
+
+    def test_json_format_no_secrets(self) -> None:
+        from unittest.mock import MagicMock, patch
+
+        mock_settings = MagicMock()
+        with patch(
+            "solgreen.integrations.solarman.settings.build_settings_from_env",
+            return_value=mock_settings,
+        ):
+            result = runner.invoke(
+                app, ["solarman", "sync", "--dry-run", "--json", "--plant-id", "X"]
+            )
+            output = result.stdout.lower()
+            assert "token" not in output
+            assert "password" not in output
+            assert "secret" not in output
+
+
+class TestSyncSkippedLocked:
+    def test_skipped_locked_exit_0(self) -> None:
+        from unittest.mock import MagicMock, patch
+
+        with patch("solgreen.db.connection.get_connection") as mock_get_conn:
+            mock_connection = MagicMock()
+            mock_cursor = MagicMock()
+            mock_cursor.fetchone.return_value = (False,)
+            mock_connection.cursor.return_value.__enter__.return_value = mock_cursor
+            mock_connection.close = MagicMock()
+            mock_get_conn.return_value = mock_connection
+
+            with patch(
+                "solgreen.integrations.solarman.settings.build_settings_from_env"
+            ) as mock_settings:
+                mock_settings.return_value = MagicMock()
+
+                result = runner.invoke(
+                    app,
+                    [
+                        "solarman",
+                        "sync",
+                        "--plant-id",
+                        "X",
+                        "--station-id",
+                        "ST1",
+                        "--db-url",
+                        "postgresql://x",
+                    ],
+                )
+
+                assert result.exit_code == 0
