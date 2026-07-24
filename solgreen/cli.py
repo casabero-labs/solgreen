@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import json
+import time
 from dataclasses import dataclass
 from datetime import timedelta
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 import typer
 
@@ -818,9 +820,9 @@ def solarman_sync(
         typer.Option("--plant-id", help="Plant identifier (e.g. casabero)."),
     ] = "casabero",
     station_id: Annotated[
-        str,
+        str | None,
         typer.Option("--station-id", help="SOLARMAN station ID."),
-    ] = "",
+    ] = None,
     db_url: Annotated[
         str | None,
         typer.Option(
@@ -861,16 +863,40 @@ def solarman_sync(
         typer.Option("--dry-run", help="Validate and show plan without syncing."),
     ] = False,
 ) -> None:
-    import json
-
     from solgreen.db.advisory_lock import LockStatus, acquire_sync_lock
     from solgreen.db.connection import get_connection
     from solgreen.integrations.solarman.client import SolarmanClient
     from solgreen.integrations.solarman.settings import build_settings_from_env
+    from solgreen.integrations.solarman.station_resolver import (
+        StationResolutionError,
+        get_station_from_env,
+        mask_station_id,
+        resolve_station,
+    )
     from solgreen.integrations.solarman.sync import sync_solarman_station
 
+    start_ms = int(time.time() * 1000)
     settings = build_settings_from_env()
     client = SolarmanClient(settings)
+
+    try:
+        resolved = resolve_station(
+            client,
+            explicit_station_id=station_id,
+            env_station_id=get_station_from_env(),
+        )
+        resolved_id = resolved.station_id
+        masked_id = resolved.masked_id
+    except StationResolutionError as exc:
+        _sync_error(
+            status="FAILED",
+            status_detail=str(exc),
+            plant_id=plant_id,
+            masked_id=mask_station_id(station_id or ""),
+            json_output=json_output,
+            start_ms=start_ms,
+        )
+        raise typer.Exit(code=1) from None
 
     norm_ctx = build_normalization_context(
         cli_mode=sign_normalization_mode,
@@ -878,91 +904,142 @@ def solarman_sync(
         plant_id=plant_id,
     )
 
-    if dry_run:
-        if json_output:
-            typer.echo(
-                json.dumps(
-                    {
-                        "ok": True,
-                        "dry_run": True,
-                        "station_id": station_id,
-                        "plant_id": plant_id,
-                        "would_sync": True,
-                        "message": "Dry-run: would sync station if lock acquired and API responds.",
-                    }
-                )
-            )
-        else:
-            typer.echo(f"[DRY-RUN] Station: {station_id}")
-            typer.echo(f"[DRY-RUN] Plant: {plant_id}")
-            typer.echo("[DRY-RUN] Would attempt sync if lock acquired and API responds.")
-        return
-
     conn = None
     lock = None
-    if db_url and not no_db:
+    lock_status: LockStatus | None = None
+    persist = db_url and not no_db
+
+    if persist:
         conn = get_connection(db_url)
-        if station_id:
-            lock, lock_status = acquire_sync_lock(conn, plant_id, station_id)
-            if lock_status != LockStatus.ACQUIRED:
-                if json_output:
-                    typer.echo(
-                        json.dumps(
-                            {
-                                "ok": True,
-                                "status": "SKIPPED_LOCKED",
-                                "skipped_locked": True,
-                                "station_id": station_id,
-                                "plant_id": plant_id,
-                                "warning": "Another sync is running for this station; no API call made.",
-                            }
-                        )
-                    )
-                else:
-                    typer.echo(
-                        "[SKIPPED_LOCKED] Another sync is running for this station; no API call made.",
-                        err=True,
-                    )
-                if conn:
-                    conn.close()
-                raise typer.Exit(code=0)
+        lock, lock_status = acquire_sync_lock(conn, plant_id, resolved_id)
+        if lock_status == LockStatus.BUSY:
+            _sync_skipped_locked(
+                plant_id=plant_id,
+                masked_id=masked_id,
+                json_output=json_output,
+                start_ms=start_ms,
+            )
+            if conn:
+                conn.close()
+            raise typer.Exit(code=0)
+        if lock_status == LockStatus.ERROR:
+            _sync_error(
+                status="FAILED",
+                status_detail="Failed to acquire advisory lock",
+                plant_id=plant_id,
+                masked_id=masked_id,
+                json_output=json_output,
+                start_ms=start_ms,
+            )
+            if conn:
+                conn.close()
+            raise typer.Exit(code=1) from None
+
+    dry_conn = None if dry_run else conn
 
     try:
         result = sync_solarman_station(
             client=client,
-            station_id=station_id,
+            station_id=resolved_id,
             plant_id=plant_id,
             norm_ctx=norm_ctx,
-            conn=conn,
+            conn=dry_conn,
         )
+    except Exception as exc:
+        _sync_error(
+            status="FAILED",
+            status_detail=str(exc),
+            plant_id=plant_id,
+            masked_id=masked_id,
+            json_output=json_output,
+            start_ms=start_ms,
+        )
+        raise typer.Exit(code=1) from None
     finally:
         if lock is not None:
-            lock.release()
+            released = lock.release()
+            if released == LockStatus.ERROR:
+                result.errors.append("advisory_lock_release_failed")
         if conn is not None:
             conn.close()
 
+    duration_ms = int(time.time() * 1000) - start_ms
+
+    if dry_run:
+        _sync_success(
+            status="DRY_RUN_SUCCESS",
+            plant_id=plant_id,
+            masked_id=masked_id,
+            result=result,
+            json_output=json_output,
+            dry_run=True,
+            duration_ms=duration_ms,
+        )
+        raise typer.Exit(code=0)
+
+    if result.devices_queried == 0 or result.devices_succeeded == 0:
+        status = "FAILED"
+        exit_code = 1
+    elif result.errors or result.not_confirmed_count > 0:
+        status = "PARTIAL_SUCCESS"
+        exit_code = 0
+    else:
+        status = "SUCCESS"
+        exit_code = 0
+
+    _sync_success(
+        status=status,
+        plant_id=plant_id,
+        masked_id=masked_id,
+        result=result,
+        json_output=json_output,
+        dry_run=False,
+        duration_ms=duration_ms,
+        warnings=["distributed_lock_disabled"] if not persist else None,
+    )
+    raise typer.Exit(code=exit_code)
+
+
+def _sync_success(
+    status: str,
+    plant_id: str,
+    masked_id: str,
+    result: Any,
+    json_output: bool,
+    dry_run: bool,
+    duration_ms: int,
+    warnings: list[str] | None = None,
+) -> None:
+    output = {
+        "ok": status in ("SUCCESS", "PARTIAL_SUCCESS", "DRY_RUN_SUCCESS"),
+        "status": status,
+        "station_id_masked": masked_id,
+        "plant_id": plant_id,
+        "devices_queried": result.devices_queried,
+        "devices_succeeded": result.devices_succeeded,
+        "snapshots_inserted": result.snapshots_inserted if not dry_run else 0,
+        "snapshots_skipped": result.snapshots_skipped if not dry_run else 0,
+        "duration_ms": duration_ms,
+    }
+    if result.normalized_count:
+        output["normalized_count"] = result.normalized_count
+        output["not_confirmed_count"] = result.not_confirmed_count
+        output["not_found_count"] = result.not_found_count
+    if result.errors:
+        output["error_count"] = len(result.errors)
+        output["errors"] = result.errors[:10]
+    if warnings:
+        output["warnings"] = warnings
     if json_output:
-        output = {
-            "ok": result.devices_queried > 0 and result.devices_succeeded > 0,
-            "station_id": result.station_id,
-            "plant_id": result.plant_id,
-            "devices_queried": result.devices_queried,
-            "devices_succeeded": result.devices_succeeded,
-            "snapshots_inserted": result.snapshots_inserted,
-            "snapshots_skipped": result.snapshots_skipped,
-        }
-        if result.normalized_count:
-            output["normalized_count"] = result.normalized_count
-            output["not_confirmed_count"] = result.not_confirmed_count
-            output["not_found_count"] = result.not_found_count
-        if result.errors:
-            output["errors"] = result.errors[:10]
         typer.echo(json.dumps(output))
     else:
-        typer.echo(f"Station: {result.station_id}")
+        typer.echo(f"Status: {status}")
+        typer.echo(f"Station: {masked_id}")
         typer.echo(f"Devices queried: {result.devices_queried}")
-        typer.echo(f"Snapshots inserted: {result.snapshots_inserted}")
-        typer.echo(f"Snapshots skipped (already synced): {result.snapshots_skipped}")
+        typer.echo(f"Devices succeeded: {result.devices_succeeded}")
+        if not dry_run:
+            typer.echo(f"Snapshots inserted: {result.snapshots_inserted}")
+            typer.echo(f"Snapshots skipped: {result.snapshots_skipped}")
         if result.normalized_count:
             typer.echo(f"Normalized signals: {result.normalized_count}")
             typer.echo(f"Not confirmed: {result.not_confirmed_count}")
@@ -971,11 +1048,56 @@ def solarman_sync(
             typer.echo(f"Errors: {len(result.errors)}")
             for err in result.errors[:5]:
                 typer.echo(f"  - {err}")
+        if warnings:
+            for w in warnings:
+                typer.echo(f"  Warning: {w}")
+        typer.echo(f"Duration: {duration_ms}ms")
 
-    if result.devices_queried == 0:
-        raise typer.Exit(code=1)
-    if result.devices_succeeded == 0:
-        raise typer.Exit(code=1)
+
+def _sync_skipped_locked(
+    plant_id: str,
+    masked_id: str,
+    json_output: bool,
+    start_ms: int,
+) -> None:
+    duration_ms = int(time.time() * 1000) - start_ms
+    output = {
+        "ok": True,
+        "status": "SKIPPED_LOCKED",
+        "skipped_locked": True,
+        "station_id_masked": masked_id,
+        "plant_id": plant_id,
+        "warning": "Another sync is running for this station; no API call made.",
+        "duration_ms": duration_ms,
+    }
+    if json_output:
+        typer.echo(json.dumps(output))
+    else:
+        typer.echo(f"[SKIPPED_LOCKED] Station: {masked_id}", err=True)
+        typer.echo("Another sync is running for this station; no API call made.", err=True)
+
+
+def _sync_error(
+    status: str,
+    status_detail: str,
+    plant_id: str,
+    masked_id: str,
+    json_output: bool,
+    start_ms: int,
+) -> None:
+    duration_ms = int(time.time() * 1000) - start_ms
+    output = {
+        "ok": False,
+        "status": status,
+        "station_id_masked": masked_id,
+        "plant_id": plant_id,
+        "errors": [status_detail],
+        "duration_ms": duration_ms,
+    }
+    if json_output:
+        typer.echo(json.dumps(output))
+    else:
+        typer.echo(f"[{status}] {status_detail}", err=True)
 
 
 def main() -> None:

@@ -115,6 +115,18 @@ fi
 # Add JSON output
 SYNC_CMD+=(--json)
 
+# Optionally run doctor first
+if [[ "${SOLGREEN_SYNC_SKIP_DOCTOR:-}" != "1" ]]; then
+    log "Running pre-sync doctor check..."
+    DOCTOR_OUTPUT=$(uv run solgreen solarman doctor --json 2>&1) || true
+    if echo "$DOCTOR_OUTPUT" | python3 -c "import sys,json; d=json.load(sys.stdin); sys.exit(0 if d.get('ready', False) else 1)" 2>/dev/null; then
+        log "Doctor check passed"
+    else
+        log "Doctor check did not pass — continuing anyway (doctor is advisory)"
+        echo "$DOCTOR_OUTPUT" | python3 -c "import sys,json; print(json.dumps(json.load(sys.stdin), indent=2))" 2>/dev/null || echo "$DOCTOR_OUTPUT"
+    fi
+fi
+
 log "Starting SOLARMAN sync..."
 log "Command: solgreen solarman sync --plant-id ${SOLGREEN_PLANT_ID} --sign-normalization-mode ${SOLGREEN_SIGN_NORMALIZATION_MODE}"
 

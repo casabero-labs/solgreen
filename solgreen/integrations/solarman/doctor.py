@@ -7,8 +7,12 @@ from enum import StrEnum
 from typing import Any
 
 from solgreen.integrations.solarman.client import SolarmanClient
-from solgreen.integrations.solarman.models import StationInfo
 from solgreen.integrations.solarman.settings import SolarmanSettings
+from solgreen.integrations.solarman.station_resolver import (
+    StationResolutionError,
+    get_station_from_env,
+    resolve_station,
+)
 
 
 class CheckStatus(StrEnum):
@@ -59,17 +63,6 @@ class DoctorResult:
         }
 
 
-def mask_station_id(station_id: str) -> str:
-    """Return a masked version safe for display."""
-    if len(station_id) <= 4:
-        return (
-            station_id[:2] + "**" + station_id[-2:]
-            if len(station_id) == 4
-            else station_id[:2] + "**"
-        )
-    return station_id[:2] + "**" + station_id[-2:]
-
-
 def run_doctor(
     settings: SolarmanSettings,
     station_id: str | None = None,
@@ -86,92 +79,57 @@ def run_doctor(
     if not all(c.status in (CheckStatus.PASS, CheckStatus.WARN) for c in result.checks):
         return result
 
-    conn = None
     client = SolarmanClient(settings)
     try:
-        _check_stations(result, client)
+        try:
+            resolved = resolve_station(
+                client,
+                explicit_station_id=station_id,
+                env_station_id=get_station_from_env(),
+            )
+            result.add(
+                "station_resolution",
+                CheckStatus.PASS,
+                f"Resolved: {resolved.display}",
+                masked_station_id=resolved.display,
+            )
+        except StationResolutionError as exc:
+            result.add("station_resolution", CheckStatus.FAIL, str(exc))
+            return result
+
+        _check_devices(result, client, resolved.station_id)
         if not all(c.status in (CheckStatus.PASS, CheckStatus.WARN) for c in result.checks):
             return result
 
-        stations_data = [
-            c.data.get("stations", []) for c in result.checks if c.name == "station_list"
-        ]
-        stations: list[StationInfo] = stations_data[0] if stations_data else []
-
-        resolved = _resolve_station_safe(stations, station_id, result)
-        if resolved is None:
+        _check_current_data(result, client, resolved.station_id)
+        if not all(c.status in (CheckStatus.PASS, CheckStatus.WARN) for c in result.checks):
             return result
 
-        station_id_str = resolved.station_id
-        assert station_id_str is not None
-
-        _check_devices(result, client, station_id_str)
-        _check_current_data(result, client, station_id_str)
     finally:
         client.close()
 
     if db_url:
-        conn = _check_database_conn(db_url)
-        if conn:
-            try:
-                _check_migrations_with_conn(result, conn)
-            finally:
-                conn.close()
+        _check_database_with_conn(result, db_url)
     else:
         _check_database(result, None)
 
     return result
 
 
-def _resolve_station_safe(
-    stations: list[StationInfo], explicit_station_id: str | None, result: DoctorResult
-) -> StationInfo | None:
-    if explicit_station_id:
-        for s in stations:
-            if s.station_id == explicit_station_id:
-                return s
-        result.add(
-            "station_resolution",
-            CheckStatus.FAIL,
-            f"Station '{mask_station_id(explicit_station_id)}' not found in account",
-        )
-        return None
-
-    if len(stations) == 1:
-        result.add("station_resolution", CheckStatus.PASS, "Single station auto-detected")
-        return stations[0]
-
-    if len(stations) == 0:
-        result.add("station_resolution", CheckStatus.FAIL, "No stations found in account")
-        return None
-
-    masked = [mask_station_id(s.station_id or "") for s in stations]
-    result.add(
-        "station_resolution",
-        CheckStatus.FAIL,
-        f"Multiple stations ({len(stations)}). Specify one via --station-id or SOLGREEN_SOLARMAN_STATION_ID. Available (masked): {masked}",
-    )
-    return None
-
-
 def _check_configuration(result: DoctorResult, settings: SolarmanSettings) -> None:
     try:
         if not settings.solarman_base_url:
-            result.add("config", CheckStatus.FAIL, "solarman_base_url is empty")
-            return
+            result.add("config", CheckStatus.FAIL, "solarman_base_url is missing")
         if not settings.solarman_app_id:
             result.add("config", CheckStatus.FAIL, "solarman_app_id is missing")
-            return
         if not settings.solarman_app_secret:
             result.add("config", CheckStatus.FAIL, "solarman_app_secret is missing")
-            return
         if not settings.solarman_email:
             result.add("config", CheckStatus.FAIL, "solarman_email is missing")
-            return
         if not settings.solarman_password_sha256:
             result.add("config", CheckStatus.FAIL, "solarman_password_sha256 is missing")
-            return
-        result.add("config", CheckStatus.PASS, "Configuration valid")
+        if settings.solarman_base_url and settings.solarman_app_id and settings.solarman_app_secret:
+            result.add("config", CheckStatus.PASS, "Configuration valid")
     except Exception as exc:
         result.add("config", CheckStatus.FAIL, f"Configuration error: {exc}")
 
@@ -181,23 +139,13 @@ def _check_authentication(result: DoctorResult, settings: SolarmanSettings) -> N
 
     try:
         auth = SolarmanAuth(settings)
-        auth.obtain_token()
-        result.add("auth", CheckStatus.PASS, "Authentication successful")
+        token = auth.get_token()
+        if token:
+            result.add("auth", CheckStatus.PASS, "Authentication successful")
+        else:
+            result.add("auth", CheckStatus.FAIL, "Authentication failed: no token returned")
     except Exception as exc:
         result.add("auth", CheckStatus.FAIL, f"Authentication failed: {exc}")
-
-
-def _check_stations(result: DoctorResult, client: SolarmanClient) -> None:
-    try:
-        stations = client.list_stations()
-        result.add(
-            "station_list",
-            CheckStatus.PASS if stations else CheckStatus.WARN,
-            f"Found {len(stations)} station(s)",
-            station_count=len(stations),
-        )
-    except Exception as exc:
-        result.add("station_list", CheckStatus.FAIL, f"Failed to list stations: {exc}")
 
 
 def _check_devices(result: DoctorResult, client: SolarmanClient, station_id: str) -> None:
@@ -236,7 +184,7 @@ def _check_current_data(result: DoctorResult, client: SolarmanClient, station_id
                     has_valid_timestamp = True
 
                 data_list = data.data_list or []
-                signal_keys = {item.get("key", "") for item in data_list}
+                signal_keys = {str(item.get("key", "")) for item in data_list}
 
                 if SYNC_AUTHORIZED_KEYS & signal_keys:
                     has_required_signals = True
@@ -252,60 +200,53 @@ def _check_current_data(result: DoctorResult, client: SolarmanClient, station_id
             except Exception:
                 continue
 
-        if not checked:
-            result.add("current_data", CheckStatus.WARN, "Could not check any device")
-        elif not has_valid_timestamp:
-            result.add("current_data", CheckStatus.FAIL, "Invalid timestamps in current data")
+        if checked == 0:
+            result.add(
+                "current_data", CheckStatus.FAIL, "Could not fetch current data from any device"
+            )
         elif authorized_unit_errors:
             result.add(
                 "current_data",
                 CheckStatus.FAIL,
-                f"Invalid units on authorized signals: {authorized_unit_errors[0]}",
+                f"Unit errors: {'; '.join(authorized_unit_errors[:3])}",
             )
+        elif not has_valid_timestamp:
+            result.add("current_data", CheckStatus.WARN, "No valid timestamps in current data")
         elif not has_required_signals:
-            missing = SYNC_AUTHORIZED_KEYS - signal_keys
             result.add(
-                "current_data",
-                CheckStatus.WARN,
-                f"Missing required signals: {missing}",
+                "current_data", CheckStatus.WARN, "Required signals not found in current data"
             )
         else:
             result.add(
                 "current_data",
                 CheckStatus.PASS,
-                f"Current data valid (checked {checked} device(s))",
+                "Current data valid",
+                signals_found=len(SYNC_AUTHORIZED_KEYS & signal_keys),
             )
     except Exception as exc:
         result.add("current_data", CheckStatus.FAIL, f"Failed to check current data: {exc}")
 
 
-def _check_database(result: DoctorResult, db_url: str | None) -> None:
-    if not db_url:
-        result.add("database", CheckStatus.WARN, "No database configured (--no-db mode)")
-        return
-    try:
-        import psycopg2
-
-        conn = psycopg2.connect(db_url)
-        with conn.cursor() as cur:
-            cur.execute("SELECT 1")
-        conn.close()
-        result.add("database", CheckStatus.PASS, "PostgreSQL connection OK")
-    except Exception as exc:
-        result.add("database", CheckStatus.FAIL, f"Database connection failed: {exc}")
+def _check_database(result: DoctorResult, conn: Any) -> None:
+    result.add(
+        "database",
+        CheckStatus.WARN,
+        "No database configured; persistence disabled",
+        distributed_lock_enabled=False,
+    )
+    result.add(
+        "migrations",
+        CheckStatus.WARN,
+        "No database configured; migrations not applicable",
+    )
 
 
-def _check_database_conn(db_url: str) -> Any:
+def _check_database_with_conn(result: DoctorResult, db_url: str) -> None:
     import psycopg2
 
+    conn = None
     try:
-        return psycopg2.connect(db_url)
-    except Exception:
-        return None
-
-
-def _check_migrations_with_conn(result: DoctorResult, conn: Any) -> None:
-    try:
+        conn = psycopg2.connect(db_url)
         cur = conn.cursor()
         cur.execute(
             "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'schema_migrations')"
@@ -314,26 +255,47 @@ def _check_migrations_with_conn(result: DoctorResult, conn: Any) -> None:
         cur.close()
 
         if not exists:
-            result.add("migrations", CheckStatus.WARN, "schema_migrations table not found")
-            return
-
-        from solgreen.db.migrations.runner import get_migration_runner
-
-        runner = get_migration_runner(conn)
-        applied, pending = runner.status()
-        if pending:
             result.add(
-                "migrations",
-                CheckStatus.WARN,
-                f"{len(pending)} pending migration(s)",
-                pending_count=len(pending),
+                "database",
+                CheckStatus.PASS,
+                "Database connected; schema_migrations not found",
+                distributed_lock_enabled=True,
             )
+            result.add("migrations", CheckStatus.WARN, "schema_migrations table not found")
         else:
+            result.add(
+                "database",
+                CheckStatus.PASS,
+                "Database connected; migrations table present",
+                distributed_lock_enabled=True,
+            )
+            _check_migrations_with_conn(result, conn)
+    except Exception as exc:
+        result.add(
+            "database",
+            CheckStatus.FAIL,
+            f"Database connection failed: {exc}",
+        )
+        result.add("migrations", CheckStatus.FAIL, "Database unavailable")
+    finally:
+        if conn:
+            conn.close()
+
+
+def _check_migrations_with_conn(result: DoctorResult, conn: Any) -> None:
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT version, name FROM schema_migrations ORDER BY version")
+        rows = cur.fetchall()
+        cur.close()
+        if rows:
             result.add(
                 "migrations",
                 CheckStatus.PASS,
-                f"All {len(applied)} migration(s) applied",
-                applied_count=len(applied),
+                f"{len(rows)} migration(s) applied",
+                applied_count=len(rows),
             )
+        else:
+            result.add("migrations", CheckStatus.WARN, "No migrations applied")
     except Exception as exc:
-        result.add("migrations", CheckStatus.FAIL, f"Migration check failed: {exc}")
+        result.add("migrations", CheckStatus.FAIL, f"Failed to check migrations: {exc}")

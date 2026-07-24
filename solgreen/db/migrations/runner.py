@@ -103,16 +103,36 @@ class MigrationRunner:
         self, migrations_path: Path | None = None
     ) -> tuple[list[AppliedMigration], list[MigrationFile]]:
         if migrations_path is None:
-            migrations_path = Path(__file__).parent / "migrations"
-        applied = list(self._get_applied().values())
-        pending = self._get_pending(migrations_path)
+            migrations_path = Path(__file__).parent
+        applied_map = self._get_applied()
+        all_migrations = self._scan_migrations(migrations_path)
+        applied = list(applied_map.values())
+
+        drift_errors: list[str] = []
+        for m in all_migrations:
+            if m.version in applied_map:
+                existing = applied_map[m.version]
+                if m.checksum != existing.checksum:
+                    drift_errors.append(
+                        f"Migration {m.version} ({m.name}) checksum drift. "
+                        f"File: {m.checksum[:16]}..., DB: {existing.checksum[:16]}..."
+                    )
+                if m.name != existing.name:
+                    drift_errors.append(
+                        f"Migration {m.version} name drift. File: {m.name}, DB: {existing.name}"
+                    )
+
+        if drift_errors:
+            raise RuntimeError("; ".join(drift_errors))
+
+        pending = [m for m in all_migrations if m.version not in applied_map]
         return applied, pending
 
     def apply(
         self, migrations_path: Path | None = None, target_version: int | None = None
     ) -> list[MigrationFile]:
         if migrations_path is None:
-            migrations_path = Path(__file__).parent / "migrations"
+            migrations_path = Path(__file__).parent
         self._ensure_control_table()
         applied_map = self._get_applied()
         all_migrations = self._scan_migrations(migrations_path)
@@ -120,7 +140,7 @@ class MigrationRunner:
         for m in all_migrations:
             if m.version in applied_map:
                 existing = applied_map[m.version]
-                if m.version != existing.version or m.checksum != existing.checksum:
+                if m.checksum != existing.checksum:
                     raise RuntimeError(
                         f"Migration {m.version} ({m.name}) checksum mismatch. "
                         f"File: {m.checksum[:16]}..., DB: {existing.checksum[:16]}..."
@@ -142,7 +162,7 @@ class MigrationRunner:
                     cur.execute(sql)
                 with self._conn.cursor() as cur:
                     cur.execute(
-                        "SELECT id FROM schema_migrations WHERE version = %s",
+                        "SELECT version, name, checksum FROM schema_migrations WHERE version = %s",
                         (migration.version,),
                     )
                     existing = cur.fetchone()
