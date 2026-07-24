@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 from unittest.mock import MagicMock
 
 import pytest
+from click import unstyle
 from typer.testing import CliRunner
 
 from solgreen.cli import app
@@ -23,6 +24,12 @@ from solgreen.integrations.solarman.sync import (
 )
 
 runner = CliRunner()
+
+
+def _plain_help(args: list[str]) -> str:
+    result = runner.invoke(app, [*args, "--help"], color=False)
+    assert result.exit_code == 0, result.output
+    return unstyle(result.stdout)
 
 
 def _make_snapshot(device_sn: str = "SR-001", **overrides: object) -> SolarmanSnapshot:
@@ -378,19 +385,16 @@ class TestSyncResult:
 
 class TestSyncCliFlags:
     def test_sync_help_shows_json_flag(self) -> None:
-        result = runner.invoke(app, ["solarman", "sync", "--help"])
-        assert result.exit_code == 0
-        assert "--json" in result.stdout
+        output = _plain_help(["solarman", "sync"])
+        assert "--json" in output
 
     def test_sync_help_shows_dry_run_flag(self) -> None:
-        result = runner.invoke(app, ["solarman", "sync", "--help"])
-        assert result.exit_code == 0
-        assert "--dry-run" in result.stdout
+        output = _plain_help(["solarman", "sync"])
+        assert "--dry-run" in output
 
     def test_sync_help_shows_no_db_flag(self) -> None:
-        result = runner.invoke(app, ["solarman", "sync", "--help"])
-        assert result.exit_code == 0
-        assert "--no-db" in result.stdout
+        output = _plain_help(["solarman", "sync"])
+        assert "--no-db" in output
 
     def test_dry_run_exit_0(self) -> None:
         from unittest.mock import MagicMock, patch
