@@ -56,6 +56,10 @@ from solgreen.timeline.episode import CanonicalEpisode, build_episodes
 from solgreen.timeline.join import DEFAULT_TOLERANCE
 
 app = typer.Typer(add_completion=False, help="Solgreen CLI", no_args_is_help=True)
+solarman_app = typer.Typer(
+    add_completion=False, help="SOLARMAN API operations", no_args_is_help=True
+)
+app.add_typer(solarman_app, name="solarman")
 
 
 def _version_callback(value: bool) -> None:
@@ -588,6 +592,97 @@ def health_check(
                 ok = False
 
     if not ok:
+        raise typer.Exit(code=1)
+
+
+@solarman_app.command("sync")
+def solarman_sync(
+    plant_id: Annotated[
+        str,
+        typer.Option("--plant-id", help="Plant identifier (e.g. casabero)."),
+    ] = "casabero",
+    station_id: Annotated[
+        str,
+        typer.Option("--station-id", help="SOLARMAN station ID."),
+    ] = "",
+    db_url: Annotated[
+        str | None,
+        typer.Option(
+            "--db-url",
+            envvar="SOLGREEN_DATABASE_URL",
+            help="PostgreSQL connection URL. If omitted, persistence is skipped.",
+        ),
+    ] = None,
+    no_db: Annotated[
+        bool,
+        typer.Option(
+            "--no-db",
+            help="Skip database persistence even if SOLGREEN_DATABASE_URL is set.",
+        ),
+    ] = False,
+    sign_normalization_mode: Annotated[
+        str | None,
+        typer.Option(
+            "--sign-normalization-mode",
+            envvar="SOLGREEN_SIGN_NORMALIZATION_MODE",
+            help="Sign normalization mode: off, legacy, or d10. Default: off.",
+        ),
+    ] = None,
+    sign_registry_effective_from: Annotated[
+        str | None,
+        typer.Option(
+            "--sign-registry-effective-from",
+            envvar="SOLGREEN_SIGN_REGISTRY_EFFECTIVE_FROM",
+            help="ISO 8601 cutover timestamp for d10 mode.",
+        ),
+    ] = None,
+) -> None:
+    from solgreen.db.connection import get_connection
+    from solgreen.integrations.solarman.client import SolarmanClient
+    from solgreen.integrations.solarman.settings import build_settings_from_env
+    from solgreen.integrations.solarman.sync import sync_solarman_station
+
+    settings = build_settings_from_env()
+    client = SolarmanClient(settings)
+
+    norm_ctx = build_normalization_context(
+        cli_mode=sign_normalization_mode,
+        cli_effective_from=sign_registry_effective_from,
+        plant_id=plant_id,
+    )
+
+    conn = None
+    if db_url and not no_db:
+        conn = get_connection(db_url)
+
+    try:
+        result = sync_solarman_station(
+            client=client,
+            station_id=station_id,
+            plant_id=plant_id,
+            norm_ctx=norm_ctx,
+            conn=conn,
+        )
+    finally:
+        if conn is not None:
+            conn.close()
+
+    typer.echo(f"Station: {result.station_id}")
+    typer.echo(f"Devices queried: {result.devices_queried}")
+    typer.echo(f"Snapshots inserted: {result.snapshots_inserted}")
+    typer.echo(f"Snapshots skipped (already synced): {result.snapshots_skipped}")
+    if result.normalized_count:
+        typer.echo(f"Normalized signals: {result.normalized_count}")
+        typer.echo(f"Not confirmed: {result.not_confirmed_count}")
+        typer.echo(f"Not found: {result.not_found_count}")
+    if result.errors:
+        typer.echo(f"Errors: {len(result.errors)}")
+        for err in result.errors[:5]:
+            typer.echo(f"  - {err}")
+
+    if result.devices_queried == 0:
+        raise typer.Exit(code=1)
+    if result.devices_succeeded == 0:
         raise typer.Exit(code=1)
 
 
