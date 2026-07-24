@@ -1,145 +1,94 @@
-# Plan ejecutable
+# Plan ejecutable — Solgreen
 
-## Baseline auditado
+## Baseline estable
 
 - Rama: `main`
-- SHA: `94a66407e258990bbf9d7ed347a86d9cf529caf5`
-- Fecha: 2026-07-20
+- SHA de reconciliación R0: `1f70674f0a0d835c8933dc23f38f46f798a6facb`
 - Auditoría: [`../qa_reports/DEVELOPMENT_AUDIT_2026-07-20.md`](../qa_reports/DEVELOPMENT_AUDIT_2026-07-20.md)
 
-## Resumen del avance real
+## Línea activa
 
-### Cerrado
+- Rama: `develop/solgreen-unified`
+- Epic: #26
+- Pull request único: #27
+- Política: un solo PR activo contra `main`
+- Roadmap: [`UNIFIED_DEVELOPMENT_LINE.md`](UNIFIED_DEVELOPMENT_LINE.md)
+- QA report U1: [`../qa_reports/U1_DATA_QUALITY_RESULTS_2026-07-21.md`](../qa_reports/U1_DATA_QUALITY_RESULTS_2026-07-21.md)
 
-- I1 — importación reproducible de ambos formatos SolarMAN;
-- hashing, normalización temporal, fixtures y CLI básica.
+El PR económico #8 fue cerrado como supersedido. Su fundación E0 fue absorbida en esta línea y no continúa como pista separada.
 
-### Parcial
+## Estado U0
 
-- Q2 — orden, duplicados, huecos y score básico;
-- T3 — muestra canónica y join por tolerancia;
-- P8 — persistencia PostgreSQL inicial;
-- O11 — Docker, health y workflow de deploy.
+Técnicamente verificado en la línea unificada; pendiente de revisión humana
+visual y funcional. Evidencia:
+[`../qa_reports/U0_FRONTEND_FOUNDATION_RESULTS_2026-07-20.md`](../qa_reports/U0_FRONTEND_FOUNDATION_RESULTS_2026-07-20.md).
 
-### Prototipo o catálogo
+## Estado U1 — ENGINEERING CLOSED
 
-- agrupador temporal denominado episodio;
-- catálogo seed de reglas;
-- proveedores MiniMax/DeepSeek;
-- prompt y validador LLM.
+### Verificado en la línea unificada
 
-### No iniciado
+- semántica de cero y estado (cero medido preservado, estado textual conservado);
+- dimensiones de calidad separadas (completeness, temporal_coverage,
+  duplicate_integrity, plausibility_score, consistency_score);
+- plausibilidad universal (NaN/Inf, SOC 0–100, temperatura ≥ −273.15 °C)
+  y rangos configurables por perfil;
+- consistencia entre fuentes solo con pares declarados en perfil;
+- parser ISO 8601 puro, testeado, con validación antes de side effects;
+- formato global Python normalizado (`ruff format .`);
+- `package-lock.json` versionado, `npm ci` reproducible;
+- reglas seed explícitamente `planned` (ninguna dispara por presencia
+  de señales); evaluadores científicos diferidos a U3;
+- gate LLM: sin regla fired con evidencia, no se llama al proveedor.
 
-- métricas físicas;
-- detectores científicos de eventos;
-- evaluadores reales de reglas;
-- golden cases del 17 y 19;
-- UI D3;
-- PDF técnico;
-- motor de factura Afinia.
+### Comandos de desarrollo
 
-## Próximo loop obligatorio
+#### Backend
 
-# R0 — Development reconciliation and safety gate
+```bash
+uv sync --extra dev --frozen
+uv run ruff check .
+uv run ruff format --check .
+uv run mypy solgreen
+uv run pytest --cov=solgreen --cov-fail-under=80
+```
 
-## Goal
+#### Frontend
 
-Restablecer coherencia entre documentación y código, evitar falsos diagnósticos y recuperar validación continua.
+```bash
+cd apps/web
+npm ci --no-audit --no-fund
+npm run typecheck
+npm run test
+npm run build
+```
 
-## Scope
+### Pendiente o bloqueado
 
-- estado documental;
-- CI documental y privacidad;
-- seguridad de reglas seed;
-- semántica de cero FV;
-- estado textual del inversor;
-- bloqueo de IA sin evidencia evaluada;
-- tratamiento del PR #8 divergido.
+- motor de energía W→Wh/kWh (U2);
+- eventos científicos y evaluadores determinísticos (U3);
+- golden cases privados;
+- endpoints de frontend;
+- motor tarifario;
+- IA validada;
+- PDF y deploy verificable.
 
-## Out of scope
+El issue #21 permanece abierto para detección científica de eventos (U3).
+Los issues #24 y #25 están resueltos en la rama; pendientes de merge a main.
+El issue #20 sigue abierto para evaluadores U3.
 
-- nuevas reglas científicas;
-- métricas de energía;
-- UI;
-- D3;
-- facturación;
-- PDF;
-- cambios de esquema grandes;
-- control del inversor.
+## Próximo paso exacto
 
-## Stop conditions
+**U2.0** — DISCOVERY_COMPLETE_HUMAN_GATE_PENDING.
 
-| Condición | Estado inicial |
-|---|---|
-| README, CHANGELOG, NEXT_STEPS y LOOP_REGISTRY coinciden | FAIL |
-| CI corre también en cambios documentales | FAIL |
-| reglas no se activan por mera presencia | FAIL |
-| cero FV permanece cero | FAIL |
-| estado textual permanece en muestras merged | FAIL |
-| IA no recibe reglas no evaluadas | FAIL |
-| PR económico no puede fusionarse accidentalmente | FAIL |
-| ruff, format, mypy y pytest pasan | PENDING |
+La semántica energética, la jerarquía de autoridad, los perfiles de signo
+y los contratos de integración están documentados. La implementación de
+U2.1 (normalización direccional) está bloqueada hasta que los human gates
+confirmen signos de red y batería con evidencia privada.
 
-## Human gate
+Evidencia U2.0:
+- [`../docs/domain/ENERGY_SEMANTICS.md`](../docs/domain/ENERGY_SEMANTICS.md)
+- [`../docs/decisions/ADR-008-energy-integration-and-sign-profiles.md`](../docs/decisions/ADR-008-energy-integration-and-sign-profiles.md)
+- [`../docs/qa_reports/U2_ENERGY_DISCOVERY_2026-07-21.md`](../docs/qa_reports/U2_ENERGY_DISCOVERY_2026-07-21.md)
 
-No hacer merge automático. El propietario revisa el PR correctivo y autoriza el cierre de R0.
-
-## Después de R0
-
-### Q2.3 — Plausibilidad física y calidad avanzada
-
-Entregables:
-
-- salto SOC físicamente improbable;
-- temperatura imposible;
-- frecuencia y voltaje plausibles;
-- signo contradictorio;
-- huecos ponderados por duración;
-- cobertura temporal;
-- score que no considere perfecto un lote vacío;
-- tests sintéticos de regresión.
-
-### M4.1 — Energía y balance
-
-Depende de Q2.3 y T3:
-
-- integración temporal de W a Wh/kWh;
-- tratamiento explícito de huecos;
-- balance por ventana;
-- residual y confianza;
-- fixtures con resultados manuales conocidos.
-
-### E5.1 — Eventos científicos
-
-Depende de M4:
-
-- detector de dropout FV;
-- pérdida y retorno de red;
-- SOC bajo;
-- inicializaciones repetidas;
-- ventanas antes/durante/después;
-- golden cases del 17 y 19.
-
-### R6.1 — Evaluadores determinísticos
-
-Cada regla debe tener algoritmo, parámetros, evidencia, falsos positivos y tests. La presencia de una señal nunca equivale a activación.
-
-### A7.1 — IA validada
-
-Solo después de R6.1:
-
-- evidence IDs estables;
-- exact coverage;
-- rechazo de referencias inexistentes;
-- rechazo de causas confirmadas;
-- prompts versionados;
-- consenso opcional;
-- tests adversariales.
-
-### ECO — Rebase de inteligencia económica
-
-El PR #8 no debe fusionarse tal como está. Después de R0 debe recrearse desde main y conservar únicamente la fundación económica compatible.
-
-## Próximo prompt ejecutable
-
-Implementar únicamente R0. No iniciar Q2.3, métricas físicas, facturación, UI ni nuevas integraciones hasta que el PR correctivo pase todos los checks y sea revisado por un humano.
+Próximo loop exacto: **U2.1** — PowerSignProfile + normalización direccional.
+Depende de human gates: confirmación de signo de red y signo de batería.

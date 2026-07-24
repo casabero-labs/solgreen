@@ -46,27 +46,29 @@ def build_prompt(input_data: LLMEpisodeInput) -> str:
             lines.append(f"- {excerpt}")
         lines.append("")
 
-    lines.extend([
-        "## Instructions",
-        "",
-        "Respond in JSON with this exact schema:",
-        "",
-        "{",
-        '  "summary": "string (1-3 sentences)",',
-        '  "hypotheses": [{"description": "string", "support_level": "strong|moderate|weak", "evidence_refs": [int]}],',
-        '  "alternatives": ["string"],',
-        '  "missing_info": ["string"],',
-        '  "suggested_actions": ["string"],',
-        '  "warnings": ["string"]',
-        "}",
-        "",
-        "## Rules",
-        "",
-        "- NEVER declare a cause as 'confirmed' — use support_level instead.",
-        "- NEVER invent severity levels — reference only the activated rules.",
-        "- ALWAYS cite evidence by E-number (evidence_refs).",
-        "- If you lack information, say so in missing_info.",
-        f"- Max tokens: {input_data.max_tokens}",
-    ])
+    lines.extend(
+        [
+            "## Instructions",
+            "",
+            "Respond in JSON with this exact schema:",
+            "",
+            "{",
+            '  "summary": "string (1-3 sentences)",',
+            '  "hypotheses": [{"description": "string", "support_level": "strong|moderate|weak", "evidence_refs": [int]}],',
+            '  "alternatives": ["string"],',
+            '  "missing_info": ["string"],',
+            '  "suggested_actions": ["string"],',
+            '  "warnings": ["string"]',
+            "}",
+            "",
+            "## Rules",
+            "",
+            "- NEVER declare a cause as 'confirmed' — use support_level instead.",
+            "- NEVER invent severity levels — reference only the activated rules.",
+            "- ALWAYS cite evidence by E-number (evidence_refs).",
+            "- If you lack information, say so in missing_info.",
+            f"- Max tokens: {input_data.max_tokens}",
+        ]
+    )
 
     return "\n".join(lines)

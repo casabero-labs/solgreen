@@ -32,18 +32,20 @@ Las reglas son determinísticas, versionadas y parametrizadas por perfil de plan
 | INV-005 | BUS anómalo | BUS positivo/negativo | electrónica DC interna |
 | CORR-001 | Episodio multicapa | reglas cercanas | correlación de eventos |
 
-## Contrato de regla
+## Estado de implementación
 
-Cada regla declara:
-
-- ID y versión;
-- pregunta técnica;
-- señales requeridas y opcionales;
-- precondiciones de calidad;
-- parámetros y fuente;
-- algoritmo;
-- evidencias producidas;
-- severidad base;
-- falsos positivos conocidos;
-- casos válidos e inválidos;
-- tests de regresión.
+- Las cinco seed rules del catálogo (DATA-001, BAT-001, PV-001, GRID-003,
+  INV-002) están explícitamente marcadas como `implementation_status=planned`.
+- Ninguna tiene evaluador determinístico de producción.
+- Su presencia en el código no implica ejecución: `evaluate_rule_catalog`
+  produce 5 outcomes `not_evaluable` y 0 `RuleExecution` persistidos.
+- Outcomes `not_evaluable` no se persisten como ejecuciones falsas ni se
+  envían al LLM.
+- Las reglas DATA-002 a DATA-005, BAT-002 a BAT-006, PV-002 a PV-005,
+  GRID-001, GRID-002, GRID-004, GRID-005, INV-001, INV-003 a INV-005 y
+  CORR-001 son definiciones de catálogo sin código activo.
+- Evaluadores científicos reales, parámetros y evidencia estructurada
+  pertenecen a U3 (#20).
+- Los parámetros seed (umbrales, falsos positivos) son provisionales.
+  Requieren perfil de planta confirmado y fuente técnica antes de activarse.
+- #20 continúa abierto como epic de evaluadores U3.

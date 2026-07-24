@@ -4,7 +4,10 @@ on:
   push:
     branches: ['**']
   pull_request:
-    branches: [main]
+    branches:
+      - main
+      - develop/solgreen-unified
+  workflow_dispatch:
 
 jobs:
   documentation:
@@ -21,9 +24,19 @@ jobs:
           test -f CHANGELOG.md
           test -f docs/domain/FOUNDATIONS.md
           test -f docs/domain/DATA_CONTRACTS.md
+          test -f docs/domain/ECONOMIC_INTELLIGENCE.md
+          test -f docs/domain/data-dictionary/afinia-billing.md
+          test -f docs/architecture/00-architecture.md
+          test -f docs/frontend/FRONTEND_ARCHITECTURE.md
+          test -f docs/phases/UNIFIED_DEVELOPMENT_LINE.md
           test -f docs/phases/LOOP_REGISTRY.md
           test -f docs/phases/NEXT_STEPS.md
           test -f docs/qa_reports/TEST_PLAN.md
+          test -f docs/qa_reports/FRONTEND_FOUNDATION_TEST_PLAN.md
+          test -f docs/qa_reports/ECONOMIC_INTELLIGENCE_TEST_PLAN.md
+          test -f docs/qa_reports/U1_DATA_QUALITY_RESULTS_2026-07-21.md
+          test -f apps/web/package.json
+          test -f apps/web/package-lock.json
 
       - name: Reject private exports and local secrets
         run: |
@@ -31,13 +44,14 @@ jobs:
             -not -path './tests/fixtures/*' \
             -not -path './.venv/*' \
             -not -path './.git/*' \
+            -not -path './apps/web/node_modules/*' \
             | grep .; then
             echo 'Private export or local secret file committed outside approved fixtures.'
             exit 1
           fi
 
-  quality-and-tests:
-    name: Quality + Tests
+  python-quality:
+    name: Python Quality + Tests
     runs-on: ubuntu-latest
 
     steps:
@@ -72,27 +86,8 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-      - name: Format changed Python files
-        shell: bash
-        run: |
-          if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
-            range="origin/$GITHUB_BASE_REF...HEAD"
-          else
-            before="${{ github.event.before }}"
-            if [[ -z "$before" || "$before" =~ ^0+$ ]]; then
-              before="$(git rev-list --max-parents=0 HEAD)"
-            fi
-            range="$before..HEAD"
-          fi
-
-          mapfile -t files < <(git diff --name-only "$range" -- '*.py')
-          if (( ${#files[@]} == 0 )); then
-            echo 'No changed Python files to format-check.'
-            exit 0
-          fi
-
-          printf 'Checking formatting for:\n%s\n' "${files[*]}"
-          uv run ruff format --check --diff "${files[@]}" > ruff-format.diff
+      - name: Format
+        run: uv run ruff format --check --diff . > ruff-format.diff
 
       - name: Upload Ruff format diff
         if: failure()
@@ -116,4 +111,112 @@ jobs:
           retention-days: 7
 
       - name: Tests with coverage
-        run: uv run pytest --cov=solgreen --cov-fail-under=80
+        shell: bash
+        run: |
+          set -o pipefail
+          uv run pytest \
+            --cov=solgreen \
+            --cov-report=term-missing \
+            --cov-report=xml:coverage.xml \
+            --cov-fail-under=80 \
+            | tee pytest-coverage.txt
+
+      - name: Upload coverage diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-coverage
+          path: |
+            pytest-coverage.txt
+            coverage.xml
+          if-no-files-found: ignore
+          retention-days: 7
+
+  frontend:
+    name: Frontend Typecheck + Tests + Build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install frontend dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Validate Showcase Ink constraints
+        run: |
+          node <<'NODE'
+          const fs = require('fs');
+          const path = require('path');
+
+          const root = path.join(process.cwd(), 'src');
+          const forbidden = [
+            /Playfair/i,
+            /--accent/i,
+            /--danger/i,
+            /--success/i,
+            /linear-gradient/i,
+            /radial-gradient/i,
+            /backdrop-filter/i,
+          ];
+          const allowedHex = new Set([
+            '#20242B', '#5B626D', '#D8DCE1', '#F4F5F7', '#FFFFFF',
+            '#8B929A', '#3A3F47', '#15181C', '#0B0D10',
+          ].map((value) => value.toLowerCase()));
+
+          function walk(directory) {
+            return fs.readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+              const target = path.join(directory, entry.name);
+              return entry.isDirectory() ? walk(target) : [target];
+            });
+          }
+
+          const files = walk(root).filter((file) => /\.(css|tsx|ts)$/.test(file));
+          const errors = [];
+
+          for (const file of files) {
+            const content = fs.readFileSync(file, 'utf8');
+            for (const rule of forbidden) {
+              if (rule.test(content)) errors.push(`${file}: forbidden ${rule}`);
+            }
+            if (file.endsWith('.css')) {
+              for (const match of content.matchAll(/#[0-9a-fA-F]{6}/g)) {
+                if (!allowedHex.has(match[0].toLowerCase())) {
+                  errors.push(`${file}: non-canonical color ${match[0]}`);
+                }
+              }
+            }
+          }
+
+          if (errors.length > 0) {
+            console.error(errors.join('\n'));
+            process.exit(1);
+          }
+
+          console.log('Showcase Ink constraints validated.');
+          NODE
+
+      - name: Type check
+        run: npm run typecheck > frontend-typecheck.txt 2>&1
+
+      - name: Upload TypeScript diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-typecheck
+          path: apps/web/frontend-typecheck.txt
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Component tests
+        run: npm run test
+
+      - name: Production build
+        run: npm run build

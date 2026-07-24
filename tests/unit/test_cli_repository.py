@@ -5,22 +5,34 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+from click import unstyle
 from typer.testing import CliRunner
 
 from solgreen.cli import (
     _build_repository,
-    _episode_checksum,
-    _evaluate_rules,
+    _run_llm_interpretation,
     app,
 )
 from solgreen.contracts import ImportBatch
 from solgreen.db.repositories.base import Repository
+from solgreen.diagnostics.rule import RuleExecution
 from solgreen.diagnostics.rule_catalog import RuleCatalog
+from solgreen.diagnostics.rule_evaluation import (
+    RuleEvaluatorRegistry,
+    eligible_fired_rules,
+    evaluate_rule_catalog,
+)
 from solgreen.timeline.canonical import CanonicalSample
 from solgreen.timeline.episode import CanonicalEpisode
 
 FIXTURES_DIR = Path(__file__).resolve().parent.parent / "fixtures"
 runner = CliRunner()
+
+
+def _plain_help(args: list[str]) -> str:
+    result = runner.invoke(app, [*args, "--help"], color=False)
+    assert result.exit_code == 0, result.output
+    return unstyle(result.stdout)
 
 
 class MockRepository(Repository):
@@ -43,17 +55,13 @@ class MockRepository(Repository):
     def list_import_batches(self, plant_id: str) -> list[ImportBatch]:
         return [b for b in self.batches.values() if b.plant_id == plant_id]
 
-    def save_canonical_samples(
-        self, batch_id: Any, samples: list[CanonicalSample]
-    ) -> None:
+    def save_canonical_samples(self, batch_id: Any, samples: list[CanonicalSample]) -> None:
         self.samples[batch_id] = samples
 
     def get_canonical_samples(self, batch_id: Any) -> list[CanonicalSample]:
         return self.samples.get(batch_id, [])
 
-    def save_canonical_episode(
-        self, batch_id: Any, episode: CanonicalEpisode
-    ) -> int:
+    def save_canonical_episode(self, batch_id: Any, episode: CanonicalEpisode) -> int:
         self._episode_counter += 1
         ep_id = self._episode_counter
         self.episodes.setdefault(batch_id, []).append(episode)
@@ -62,17 +70,13 @@ class MockRepository(Repository):
     def get_canonical_episodes(self, batch_id: Any) -> list[CanonicalEpisode]:
         return self.episodes.get(batch_id, [])
 
-    def save_rule_execution(
-        self, episode_id: int, execution: Any
-    ) -> None:
+    def save_rule_execution(self, episode_id: int, execution: Any) -> None:
         self.executions.setdefault(episode_id, []).append(execution)
 
     def get_rule_executions(self, episode_id: int) -> list[Any]:
         return self.executions.get(episode_id, [])
 
-    def save_llm_interpretation(
-        self, episode_id: int, interpretation: Any
-    ) -> None:
+    def save_llm_interpretation(self, episode_id: int, interpretation: Any) -> None:
         self.interpretations.setdefault(episode_id, []).append(interpretation)
 
     def get_llm_interpretations(self, episode_id: int) -> list[Any]:
@@ -96,7 +100,9 @@ def _make_episode(
         sample_count=12,
         coverage_pct=95.0,
         source_summary="merged",
-        signals=signals if signals is not None else {"flow_soc_pct": 75.0, "telemetry_pv_power_w": 3500.0},
+        signals=signals
+        if signals is not None
+        else {"flow_soc_pct": 75.0, "telemetry_pv_power_w": 3500.0},
     )
 
 
@@ -111,57 +117,267 @@ def test_build_repository_returns_repo_when_url() -> None:
     assert isinstance(repo, Repository)
 
 
-def test_episode_checksum_consistent() -> None:
-    ep = _make_episode()
-    c1 = _episode_checksum(ep)
-    c2 = _episode_checksum(ep)
-    assert c1 == c2
-    assert len(c1) == 64  # SHA-256 hex
+class TestDefensiveRuleEngine:
+    def test_cli_persists_no_executions_for_seed_rules(self) -> None:
+        mock_repo = MockRepository()
+        with patch("solgreen.cli._build_repository", return_value=mock_repo):
+            result = runner.invoke(
+                app,
+                [
+                    "import",
+                    "-f",
+                    str(FIXTURES_DIR / "flow_small.csv"),
+                    "--align-with",
+                    str(FIXTURES_DIR / "telemetry_small.csv"),
+                    "-o",
+                    str(FIXTURES_DIR.parent / "_out"),
+                    "--plant-id",
+                    "casabero",
+                    "--db-url",
+                    "postgresql://test@localhost/test",
+                ],
+            )
+        assert result.exit_code == 0, result.output
+        assert mock_repo.executions == {}
+        assert "not evaluable" in result.output
+
+    def test_mock_repository_executions_remain_empty_for_seed(self) -> None:
+        mock_repo = MockRepository()
+        catalog = RuleCatalog()
+        registry = RuleEvaluatorRegistry()
+        episode = _make_episode()
+        outcomes = evaluate_rule_catalog(catalog, episode, registry)
+        for outcome in outcomes:
+            if outcome.execution is not None:
+                mock_repo.executions.setdefault(0, []).append(outcome.execution)
+        assert mock_repo.executions == {}
+
+    def test_cli_reports_rules_count(self) -> None:
+        mock_repo = MockRepository()
+        with patch("solgreen.cli._build_repository", return_value=mock_repo):
+            result = runner.invoke(
+                app,
+                [
+                    "import",
+                    "-f",
+                    str(FIXTURES_DIR / "flow_small.csv"),
+                    "--align-with",
+                    str(FIXTURES_DIR / "telemetry_small.csv"),
+                    "-o",
+                    str(FIXTURES_DIR.parent / "_out"),
+                    "--plant-id",
+                    "casabero",
+                    "--db-url",
+                    "postgresql://test@localhost/test",
+                ],
+            )
+        assert result.exit_code == 0, result.output
+        assert "Rules:" in result.output
+
+    def test_cli_no_all_required_signals_evidence(self) -> None:
+        mock_repo = MockRepository()
+        with patch("solgreen.cli._build_repository", return_value=mock_repo):
+            result = runner.invoke(
+                app,
+                [
+                    "import",
+                    "-f",
+                    str(FIXTURES_DIR / "flow_small.csv"),
+                    "--align-with",
+                    str(FIXTURES_DIR / "telemetry_small.csv"),
+                    "-o",
+                    str(FIXTURES_DIR.parent / "_out"),
+                    "--plant-id",
+                    "casabero",
+                    "--db-url",
+                    "postgresql://test@localhost/test",
+                ],
+            )
+        assert result.exit_code == 0, result.output
+        assert "All required signals present" not in result.output
 
 
-def test_episode_checksum_changes_with_different_episode() -> None:
-    ep1 = _make_episode(start=datetime(2025, 1, 1, 10, 0, tzinfo=UTC))
-    ep2 = _make_episode(start=datetime(2025, 1, 1, 11, 0, tzinfo=UTC))
-    assert _episode_checksum(ep1) != _episode_checksum(ep2)
+class TestLLMGate:
+    def test_provider_not_called_without_eligible_rules(self) -> None:
+        class DummyProvider:
+            provider_name = "dummy"
+            default_model = "dummy-v1"
+
+            def __init__(self) -> None:
+                self.called = False
+
+            def complete(self, prompt: str, *, max_tokens: int = 2000) -> str:
+                self.called = True
+                return "{}"
+
+        provider = DummyProvider()
+        episode = _make_episode()
+        outcomes = evaluate_rule_catalog(RuleCatalog(), episode, RuleEvaluatorRegistry())
+        _run_llm_interpretation(
+            provider=provider,  # type: ignore[arg-type]
+            plant_id="casabero",
+            episode=episode,
+            outcomes=outcomes,
+            episode_id=1,
+            repo=MockRepository(),
+        )
+        assert provider.called is False
+
+    def test_no_llm_interpretation_saved_without_eligible_rules(self) -> None:
+        mock_repo = MockRepository()
+
+        class DummyProvider:
+            provider_name = "dummy"
+            default_model = "dummy-v1"
+
+            def complete(self, prompt: str, *, max_tokens: int = 2000) -> str:
+                return "{}"
+
+        episode = _make_episode()
+        outcomes = evaluate_rule_catalog(RuleCatalog(), episode, RuleEvaluatorRegistry())
+        _run_llm_interpretation(
+            provider=DummyProvider(),  # type: ignore[arg-type]
+            plant_id="casabero",
+            episode=episode,
+            outcomes=outcomes,
+            episode_id=1,
+            repo=mock_repo,
+        )
+        assert mock_repo.interpretations == {}
+
+    def test_cli_shows_llm_skipped_message(self) -> None:
+        mock_repo = MockRepository()
+
+        class DummyProvider:
+            provider_name = "dummy"
+            default_model = "dummy-v1"
+
+            def __init__(self) -> None:
+                self.called = False
+
+            def complete(self, prompt: str, *, max_tokens: int = 2000) -> str:
+                self.called = True
+                return "{}"
+
+        with (
+            patch("solgreen.cli._build_repository", return_value=mock_repo),
+            patch(
+                "solgreen.cli._build_llm_provider",
+                return_value=DummyProvider(),
+            ),
+        ):
+            result = runner.invoke(
+                app,
+                [
+                    "import",
+                    "-f",
+                    str(FIXTURES_DIR / "flow_small.csv"),
+                    "--align-with",
+                    str(FIXTURES_DIR / "telemetry_small.csv"),
+                    "-o",
+                    str(FIXTURES_DIR.parent / "_out"),
+                    "--plant-id",
+                    "casabero",
+                    "--db-url",
+                    "postgresql://test@localhost/test",
+                    "--llm-provider",
+                    "dummy",
+                    "--llm-api-key",
+                    "test-key",
+                ],
+            )
+        assert result.exit_code == 0, result.output
+        assert "LLM skipped: no validated fired-rule evidence" in result.output
+
+    def test_fired_false_excluded_from_llm_input(self) -> None:
+        episode = _make_episode()
+        executions = (
+            RuleExecution(
+                rule_id="R-A",
+                rule_version="1.0.0",
+                period_start=episode.start,
+                period_end=episode.end,
+                parameters_used={},
+                fired=False,
+                evidence=("ignored",),
+                input_checksum="abc",
+            ),
+        )
+        assert eligible_fired_rules(executions) == ()
+
+    def test_fired_true_no_evidence_excluded_from_llm_input(self) -> None:
+        episode = _make_episode()
+        executions = (
+            RuleExecution(
+                rule_id="R-A",
+                rule_version="1.0.0",
+                period_start=episode.start,
+                period_end=episode.end,
+                parameters_used={},
+                fired=True,
+                evidence=(),
+                input_checksum="abc",
+            ),
+        )
+        assert eligible_fired_rules(executions) == ()
+
+    def test_fired_true_with_evidence_eligible(self) -> None:
+        episode = _make_episode()
+        execution = RuleExecution(
+            rule_id="R-A",
+            rule_version="1.0.0",
+            period_start=episode.start,
+            period_end=episode.end,
+            parameters_used={},
+            fired=True,
+            evidence=("real",),
+            input_checksum="abc",
+        )
+        assert eligible_fired_rules((execution,)) == (execution,)
+
+    def test_llm_input_receives_only_eligible_rules(self) -> None:
+        from solgreen.diagnostics.llm_input import LLMEpisodeInput
+
+        episode = _make_episode()
+        good = RuleExecution(
+            rule_id="R-GOOD",
+            rule_version="1.0.0",
+            period_start=episode.start,
+            period_end=episode.end,
+            parameters_used={},
+            fired=True,
+            evidence=("real",),
+            input_checksum="abc",
+        )
+        not_fired = RuleExecution(
+            rule_id="R-NOT-FIRED",
+            rule_version="1.0.0",
+            period_start=episode.start,
+            period_end=episode.end,
+            parameters_used={},
+            fired=False,
+            evidence=("no fire",),
+            input_checksum="abc",
+        )
+        eligible = eligible_fired_rules((good, not_fired))
+        inp = LLMEpisodeInput(plant_id="casabero", episode=episode, fired_rules=eligible)
+        assert inp.fired_rules == (good,)
 
 
-def test_evaluate_rules_returns_execution_per_rule() -> None:
-    catalog = RuleCatalog()
-    episode = _make_episode()
-    executions = _evaluate_rules(catalog, episode)
-    assert len(executions) == len(catalog.list_rules())
+class TestBuildPromptDoesNotReceiveUnevaluable:
+    def test_build_prompt_excludes_unevaluated(self) -> None:
+        from solgreen.diagnostics.llm_input import LLMEpisodeInput
+        from solgreen.diagnostics.prompt_builder import build_prompt
 
+        episode = _make_episode()
+        outcomes = evaluate_rule_catalog(RuleCatalog(), episode, RuleEvaluatorRegistry())
+        real_executions = tuple(o.execution for o in outcomes if o.execution is not None)
+        eligible = eligible_fired_rules(real_executions)
+        assert eligible == ()
 
-def test_evaluate_rules_fires_when_signals_present() -> None:
-    catalog = RuleCatalog()
-    signals = {
-        "flow_soc_pct": 15.0,  # BAT-001 needs this
-        "telemetry_pv_power_w": 3500.0,  # PV-001 needs this
-        "telemetry_grid_power_w": 1000.0,  # GRID-003 needs this
-        "timestamp_axis": 1.0,  # DATA-001 needs this (sort of)
-    }
-    episode = _make_episode(signals=signals)
-    executions = _evaluate_rules(catalog, episode)
-    fired_ids = {e.rule_id for e in executions if e.fired}
-    assert "BAT-001" in fired_ids
-    assert "PV-001" in fired_ids
-    assert "GRID-003" in fired_ids
-
-
-def test_evaluate_rules_not_fires_when_signals_missing() -> None:
-    catalog = RuleCatalog()
-    episode = _make_episode(signals={})
-    executions = _evaluate_rules(catalog, episode)
-    fired_ids = {e.rule_id for e in executions if e.fired}
-    assert len(fired_ids) == 0
-
-
-def test_evaluate_rules_all_have_checksum() -> None:
-    catalog = RuleCatalog()
-    episode = _make_episode()
-    executions = _evaluate_rules(catalog, episode)
-    for ex in executions:
-        assert len(ex.input_checksum) == 64
+        inp = LLMEpisodeInput(plant_id="casabero", episode=episode, fired_rules=eligible)
+        prompt = build_prompt(inp)
+        assert "Activated rules" not in prompt
 
 
 def test_cli_import_no_db_persists_nothing(tmp_path: Path) -> None:
@@ -231,49 +447,37 @@ def test_cli_import_align_with_db_persists_episodes(tmp_path: Path) -> None:
     assert len(mock_repo.samples) >= 1
 
 
-def test_cli_import_align_with_llm_provider(tmp_path: Path) -> None:
-    mock_repo = MockRepository()
+class TestDbMigrateCommand:
+    def test_db_migrate_registered(self) -> None:
+        result = runner.invoke(app, ["db", "migrate", "--help"])
+        assert result.exit_code == 0
+        assert "migrate" in result.stdout.lower()
 
-    class DummyProvider:
-        provider_name = "dummy"
-        default_model = "dummy-v1"
+    def test_db_migrate_help_shows_options(self) -> None:
+        output = _plain_help(["db", "migrate"])
+        assert "--db-url" in output
+        assert "--migrations-dir" in output
+        assert "--to" in output
+        assert "--dry-run" in output
+        assert "--json" in output
 
-        def complete(self, prompt: str, *, max_tokens: int = 2000) -> str:
-            import json
-            return json.dumps({
-                "summary": "Test LLM summary.",
-                "hypotheses": [],
-                "alternatives": [],
-                "missing_info": [],
-                "suggested_actions": [],
-                "warnings": [],
-            })
+    def test_db_migrate_json_no_db_url_error(self) -> None:
+        result = runner.invoke(app, ["db", "migrate", "--json"])
+        assert result.exit_code != 0
 
-    dummy = DummyProvider()
-    with (
-        patch("solgreen.cli._build_repository", return_value=mock_repo),
-        patch("solgreen.cli._build_llm_provider", return_value=dummy),
-    ):
-        result = runner.invoke(
-            app,
-            [
-                "import",
-                "-f",
-                str(FIXTURES_DIR / "flow_small.csv"),
-                "--align-with",
-                str(FIXTURES_DIR / "telemetry_small.csv"),
-                "-o",
-                str(tmp_path),
-                "--plant-id",
-                "casabero",
-                "--db-url",
-                "postgresql://test@localhost/test",
-                "--llm-provider",
-                "dummy",
-                "--llm-api-key",
-                "test-key",
-            ],
-        )
-    assert result.exit_code == 0, result.output
-    assert "LLM provider: dummy" in result.output
-    assert "LLM:" in result.output
+
+class TestDbStatusCommand:
+    def test_db_status_registered(self) -> None:
+        result = runner.invoke(app, ["db", "status", "--help"])
+        assert result.exit_code == 0
+        assert "status" in result.stdout.lower()
+
+    def test_db_status_help_shows_options(self) -> None:
+        output = _plain_help(["db", "status"])
+        assert "--db-url" in output
+        assert "--migrations-dir" in output
+        assert "--json" in output
+
+    def test_db_status_json_no_db_url_error(self) -> None:
+        result = runner.invoke(app, ["db", "status", "--json"])
+        assert result.exit_code != 0

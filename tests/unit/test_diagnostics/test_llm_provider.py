@@ -60,7 +60,7 @@ def _make_fired_execution() -> RuleExecution:
         period_end=datetime(2025, 1, 1, 11, 0, tzinfo=UTC),
         parameters_used={"soc_threshold_pct": 20},
         fired=True,
-        evidence=("All required signals present: flow_soc_pct",),
+        evidence=("BAT-001 fired: SOC dropped to 12.5%",),
         input_checksum="abc123",
     )
 
@@ -74,20 +74,22 @@ def _make_input_data() -> LLMEpisodeInput:
     )
 
 
-VALID_RESPONSE = json.dumps({
-    "summary": "The inverter showed low SOC during the episode.",
-    "hypotheses": [
-        {
-            "description": "Battery was depleted due to high consumption.",
-            "support_level": "moderate",
-            "evidence_refs": [0],
-        }
-    ],
-    "alternatives": ["Grid outage caused battery drain."],
-    "missing_info": ["Historical SOC trend."],
-    "suggested_actions": ["Check battery health."],
-    "warnings": [],
-})
+VALID_RESPONSE = json.dumps(
+    {
+        "summary": "The inverter showed low SOC during the episode.",
+        "hypotheses": [
+            {
+                "description": "Battery was depleted due to high consumption.",
+                "support_level": "moderate",
+                "evidence_refs": [0],
+            }
+        ],
+        "alternatives": ["Grid outage caused battery drain."],
+        "missing_info": ["Historical SOC trend."],
+        "suggested_actions": ["Check battery health."],
+        "warnings": [],
+    }
+)
 
 
 def test_provider_abc_cannot_instantiate() -> None:
@@ -129,14 +131,16 @@ def test_interpret_episode_passes_max_tokens() -> None:
 
 
 def test_interpret_episode_fails_validation() -> None:
-    bad_response = json.dumps({
-        "summary": "",
-        "hypotheses": [],
-        "alternatives": [],
-        "missing_info": [],
-        "suggested_actions": [],
-        "warnings": [],
-    })
+    bad_response = json.dumps(
+        {
+            "summary": "",
+            "hypotheses": [],
+            "alternatives": [],
+            "missing_info": [],
+            "suggested_actions": [],
+            "warnings": [],
+        }
+    )
     provider = MockProvider(response=bad_response)
     input_data = _make_input_data()
     with pytest.raises(ValueError, match="validation failed"):

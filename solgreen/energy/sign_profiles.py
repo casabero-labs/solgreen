@@ -1,0 +1,526 @@
+from __future__ import annotations
+
+from datetime import datetime
+from enum import StrEnum
+from typing import Literal
+
+import pydantic
+from pydantic import BaseModel, ConfigDict, Field
+
+
+class CanonicalPowerField(StrEnum):
+    FLOW_PRODUCCION = "flow_potencia_produccion_w"
+    FLOW_CONSUMO = "flow_potencia_consumo_w"
+    FLOW_GRID = "flow_grid_w"
+    FLOW_BATTERY = "flow_battery_w"
+    TELEMETRY_PV = "telemetry_pv_power_w"
+    TELEMETRY_GRID = "telemetry_grid_power_w"
+    TELEMETRY_BATTERY = "telemetry_battery_power_w"
+
+
+class SourceSystem(StrEnum):
+    SOLARMAN_PLANT_FLOW = "solarman_plant_flow"
+    INVERTER_TELEMETRY = "inverter_telemetry"
+    FISCAL_METER = "fiscal_meter"
+
+
+class AuthorityClass(StrEnum):
+    OPERATIONAL = "operational"
+    FISCAL = "fiscal"
+
+
+class ProfileStatus(StrEnum):
+    CONFIRMED = "confirmed"
+    PROVISIONAL = "provisional"
+    UNKNOWN = "unknown"
+
+
+class DirectionEvidenceStatus(StrEnum):
+    """Per-direction evidence status.
+
+    Each PowerSignProfile carries evidence status independently for its
+    `positive_means` and `negative_means` directions. The status indicates
+    the strength of the anchor that justifies normalizing that direction.
+
+    Semantics:
+    - NOT_ASSESSED: no anchor collected for this direction.
+    - PROVISIONAL: directional anchor present but not yet owner-approved
+      as confirmed; normalization is deferred.
+    - CONFIRMED: owner-anchored evidence supports normalizing this
+      direction; the corresponding magnitude is populated.
+    - CONTRADICTED: owner-anchored evidence contradicts the assigned
+      meaning; normalization is refused for this direction.
+    """
+
+    NOT_ASSESSED = "not_assessed"
+    PROVISIONAL = "provisional"
+    CONFIRMED = "confirmed"
+    CONTRADICTED = "contradicted"
+
+
+class PowerDirection(StrEnum):
+    GRID_IMPORT = "grid_import"
+    GRID_EXPORT = "grid_export"
+    BATTERY_CHARGE = "battery_charge"
+    BATTERY_DISCHARGE = "battery_discharge"
+    PV_GENERATION = "pv_generation"
+    LOAD_CONSUMPTION = "load_consumption"
+    UNSIGNED_MAGNITUDE = "unsigned_magnitude"
+    UNKNOWN = "unknown"
+    NO_FLOW = "no_flow"
+
+
+_FLOW_FIELDS: frozenset[CanonicalPowerField] = frozenset(
+    {
+        CanonicalPowerField.FLOW_PRODUCCION,
+        CanonicalPowerField.FLOW_CONSUMO,
+        CanonicalPowerField.FLOW_GRID,
+        CanonicalPowerField.FLOW_BATTERY,
+    }
+)
+
+_TELEMETRY_FIELDS: frozenset[CanonicalPowerField] = frozenset(
+    {
+        CanonicalPowerField.TELEMETRY_PV,
+        CanonicalPowerField.TELEMETRY_GRID,
+        CanonicalPowerField.TELEMETRY_BATTERY,
+    }
+)
+
+_GRID_FIELDS: frozenset[CanonicalPowerField] = frozenset(
+    {
+        CanonicalPowerField.FLOW_GRID,
+        CanonicalPowerField.TELEMETRY_GRID,
+    }
+)
+
+_BATTERY_FIELDS: frozenset[CanonicalPowerField] = frozenset(
+    {
+        CanonicalPowerField.FLOW_BATTERY,
+        CanonicalPowerField.TELEMETRY_BATTERY,
+    }
+)
+
+_PV_FIELDS: frozenset[CanonicalPowerField] = frozenset(
+    {
+        CanonicalPowerField.FLOW_PRODUCCION,
+        CanonicalPowerField.TELEMETRY_PV,
+    }
+)
+
+_LOAD_FIELDS: frozenset[CanonicalPowerField] = frozenset({CanonicalPowerField.FLOW_CONSUMO})
+
+_GRID_DIRECTIONS: frozenset[PowerDirection] = frozenset(
+    {PowerDirection.GRID_IMPORT, PowerDirection.GRID_EXPORT, PowerDirection.UNKNOWN}
+)
+
+_BATTERY_DIRECTIONS: frozenset[PowerDirection] = frozenset(
+    {
+        PowerDirection.BATTERY_CHARGE,
+        PowerDirection.BATTERY_DISCHARGE,
+        PowerDirection.UNKNOWN,
+    }
+)
+
+_UNSIGNED_DIRECTIONS: frozenset[PowerDirection] = frozenset(
+    {PowerDirection.PV_GENERATION, PowerDirection.UNSIGNED_MAGNITUDE, PowerDirection.UNKNOWN}
+)
+
+_LOAD_DIRECTIONS: frozenset[PowerDirection] = frozenset(
+    {PowerDirection.LOAD_CONSUMPTION, PowerDirection.UNSIGNED_MAGNITUDE, PowerDirection.UNKNOWN}
+)
+
+
+def is_power_field_source_compatible(field: CanonicalPowerField, source: SourceSystem) -> bool:
+    if source is SourceSystem.SOLARMAN_PLANT_FLOW:
+        return field in _FLOW_FIELDS
+    if source is SourceSystem.INVERTER_TELEMETRY:
+        return field in _TELEMETRY_FIELDS
+    if source is SourceSystem.FISCAL_METER:
+        return False
+    return False
+
+
+def validity_intervals_overlap(
+    first_start: datetime,
+    first_end: datetime | None,
+    second_start: datetime,
+    second_end: datetime | None,
+) -> bool:
+    overlap = (first_end is None or second_start < first_end) and (
+        second_end is None or first_start < second_end
+    )
+    return overlap
+
+
+def is_timezone_aware(value: datetime) -> bool:
+    return value.tzinfo is not None and value.utcoffset() is not None
+
+
+def _derive_evidence_status(
+    direction: PowerDirection, profile_status: ProfileStatus
+) -> DirectionEvidenceStatus:
+    """Derive per-direction evidence status from direction and profile status.
+
+    Backward-compat rule (see ADR-009):
+        - direction = UNKNOWN           -> NOT_ASSESSED (no meaning, no evidence)
+        - profile_status = CONFIRMED    -> CONFIRMED
+        - profile_status = PROVISIONAL  -> PROVISIONAL
+        - profile_status = UNKNOWN      -> NOT_ASSESSED
+    """
+    if direction is PowerDirection.UNKNOWN:
+        return DirectionEvidenceStatus.NOT_ASSESSED
+    if profile_status is ProfileStatus.CONFIRMED:
+        return DirectionEvidenceStatus.CONFIRMED
+    if profile_status is ProfileStatus.PROVISIONAL:
+        return DirectionEvidenceStatus.PROVISIONAL
+    return DirectionEvidenceStatus.NOT_ASSESSED
+
+
+def _field_domain(field: CanonicalPowerField) -> str:
+    if field in _GRID_FIELDS:
+        return "grid"
+    if field in _BATTERY_FIELDS:
+        return "battery"
+    if field in _PV_FIELDS:
+        return "pv"
+    if field in _LOAD_FIELDS:
+        return "load"
+    return "unknown"
+
+
+def _allowed_directions(field: CanonicalPowerField) -> frozenset[PowerDirection]:
+    if field in _GRID_FIELDS:
+        return _GRID_DIRECTIONS
+    if field in _BATTERY_FIELDS:
+        return _BATTERY_DIRECTIONS
+    if field in _PV_FIELDS:
+        return _UNSIGNED_DIRECTIONS
+    if field in _LOAD_FIELDS:
+        return _LOAD_DIRECTIONS
+    return frozenset()
+
+
+class PowerSignProfile(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    plant_id: str = Field(min_length=1)
+    canonical_field: CanonicalPowerField
+    source_system: SourceSystem
+    authority_class: AuthorityClass
+    measurement_point: str = Field(min_length=1)
+    unit: Literal["W"]
+    positive_means: PowerDirection
+    negative_means: PowerDirection
+    zero_means: PowerDirection = PowerDirection.NO_FLOW
+    zero_deadband_w: float = Field(ge=0.0, default=0.0)
+    status: ProfileStatus
+    evidence_refs: tuple[str, ...] = Field(default=())
+    profile_version: str = Field(min_length=1)
+    valid_from: datetime
+    valid_to: datetime | None = None
+    notes: str | None = None
+    positive_evidence_status: DirectionEvidenceStatus | None = None
+    negative_evidence_status: DirectionEvidenceStatus | None = None
+
+    @pydantic.model_validator(mode="after")
+    def _validate_datetime_aware(self) -> PowerSignProfile:
+        if not is_timezone_aware(self.valid_from):
+            raise ValueError("valid_from must be timezone-aware (tzinfo and utcoffset both set)")
+        if self.valid_to is not None and not is_timezone_aware(self.valid_to):
+            raise ValueError("valid_to must be timezone-aware (tzinfo and utcoffset both set)")
+        return self
+
+    @pydantic.model_validator(mode="after")
+    def _validate_valid_to_after_valid_from(self) -> PowerSignProfile:
+        if self.valid_to is not None and self.valid_to <= self.valid_from:
+            raise ValueError(
+                f"valid_to ({self.valid_to}) must be after valid_from ({self.valid_from})."
+            )
+        return self
+
+    @pydantic.field_validator("evidence_refs")
+    @classmethod
+    def _no_empty_evidence_refs(cls, v: tuple[str, ...]) -> tuple[str, ...]:
+        if any(ref == "" for ref in v):
+            raise ValueError("evidence_refs must not contain empty strings.")
+        return v
+
+    @pydantic.model_validator(mode="after")
+    def _validate_field_source_compatibility(self) -> PowerSignProfile:
+        if not is_power_field_source_compatible(self.canonical_field, self.source_system):
+            raise ValueError(
+                f"Source system '{self.source_system}' is not compatible "
+                f"with field '{self.canonical_field}'."
+            )
+        return self
+
+    @pydantic.model_validator(mode="after")
+    def _validate_authority_for_operational_sources(self) -> PowerSignProfile:
+        operational_sources = (
+            SourceSystem.SOLARMAN_PLANT_FLOW,
+            SourceSystem.INVERTER_TELEMETRY,
+        )
+        if (
+            self.source_system in operational_sources
+            and self.authority_class is not AuthorityClass.OPERATIONAL
+        ):
+            raise ValueError(
+                f"Source system '{self.source_system}' requires "
+                f"authority_class=operational, got '{self.authority_class}'."
+            )
+        return self
+
+    @pydantic.model_validator(mode="after")
+    def _validate_fiscal_meter_restriction(self) -> PowerSignProfile:
+        if self.source_system is SourceSystem.FISCAL_METER:
+            raise ValueError(
+                "fiscal_meter source system cannot claim authority over "
+                "any operational power field. Fiscal profiles must target "
+                "fiscal-specific fields, not the seven operational fields."
+            )
+        return self
+
+    @pydantic.model_validator(mode="after")
+    def _validate_confirmed_requires_evidence(self) -> PowerSignProfile:
+        if self.status is ProfileStatus.CONFIRMED and len(self.evidence_refs) == 0:
+            raise ValueError("A confirmed profile must have at least one evidence_ref.")
+        return self
+
+    @pydantic.model_validator(mode="after")
+    def _derive_per_direction_evidence_status(self) -> PowerSignProfile:
+        """Derive per-direction evidence status from `status` and direction.
+
+        Backward-compat rule (see ADR-009): when a profile does not specify
+        `positive_evidence_status` / `negative_evidence_status` explicitly,
+        the values are derived as follows:
+            - direction = UNKNOWN           -> NOT_ASSESSED
+            - status = CONFIRMED            -> CONFIRMED
+            - status = PROVISIONAL          -> PROVISIONAL
+            - status = UNKNOWN              -> NOT_ASSESSED
+
+        This preserves the previous behavior for existing profiles in
+        `registry_seeds.py` and existing test fixtures.
+
+        Implementation note: we use `object.__setattr__` to mutate `self`
+        in-place because the model is `frozen=True` and Pydantic requires
+        `mode="after"` validators to return `self`. The freeze has not yet
+        been applied at this stage of construction.
+        """
+        if self.positive_evidence_status is None:
+            object.__setattr__(
+                self,
+                "positive_evidence_status",
+                _derive_evidence_status(self.positive_means, self.status),
+            )
+        if self.negative_evidence_status is None:
+            object.__setattr__(
+                self,
+                "negative_evidence_status",
+                _derive_evidence_status(self.negative_means, self.status),
+            )
+        return self
+
+    @pydantic.model_validator(mode="after")
+    def _validate_direction_evidence_combination(self) -> PowerSignProfile:
+        """Validate per-direction evidence status against the direction meaning.
+
+        Rules (per ADR-009):
+            - direction = UNKNOWN    -> evidence_status in {NOT_ASSESSED, PROVISIONAL}
+            - direction != UNKNOWN    -> evidence_status in {PROVISIONAL, CONFIRMED, CONTRADICTED}
+            - direction != UNKNOWN and evidence_status = NOT_ASSESSED -> rejected
+              (a known meaning implies some evidence must exist).
+        """
+        pos_status = self.positive_evidence_status
+        assert pos_status is not None  # ensured by _derive_per_direction_evidence_status
+        if self.positive_means is PowerDirection.UNKNOWN:
+            if pos_status not in (
+                DirectionEvidenceStatus.NOT_ASSESSED,
+                DirectionEvidenceStatus.PROVISIONAL,
+            ):
+                raise ValueError(
+                    f"positive_means=UNKNOWN requires positive_evidence_status "
+                    f"in {{NOT_ASSESSED, PROVISIONAL}}, got {pos_status.value}."
+                )
+        else:
+            if pos_status is DirectionEvidenceStatus.NOT_ASSESSED:
+                raise ValueError(
+                    f"positive_means={self.positive_means.value} requires "
+                    f"positive_evidence_status not NOT_ASSESSED "
+                    f"(a known meaning implies some evidence must exist)."
+                )
+
+        neg_status = self.negative_evidence_status
+        assert neg_status is not None  # ensured by _derive_per_direction_evidence_status
+        if self.negative_means is PowerDirection.UNKNOWN:
+            if neg_status not in (
+                DirectionEvidenceStatus.NOT_ASSESSED,
+                DirectionEvidenceStatus.PROVISIONAL,
+            ):
+                raise ValueError(
+                    f"negative_means=UNKNOWN requires negative_evidence_status "
+                    f"in {{NOT_ASSESSED, PROVISIONAL}}, got {neg_status.value}."
+                )
+        else:
+            if neg_status is DirectionEvidenceStatus.NOT_ASSESSED:
+                raise ValueError(
+                    f"negative_means={self.negative_means.value} requires "
+                    f"negative_evidence_status not NOT_ASSESSED "
+                    f"(a known meaning implies some evidence must exist)."
+                )
+
+        return self
+
+    @pydantic.model_validator(mode="after")
+    def _validate_unknown_status_directions(self) -> PowerSignProfile:
+        if self.status is ProfileStatus.UNKNOWN:
+            if self.positive_means is not PowerDirection.UNKNOWN:
+                raise ValueError("An unknown profile must use positive_means=unknown.")
+            if self.negative_means is not PowerDirection.UNKNOWN:
+                raise ValueError("An unknown profile must use negative_means=unknown.")
+            # A profile marked UNKNOWN administratively cannot simultaneously
+            # claim any per-direction evidence as CONFIRMED — that would
+            # contradict the administrative state. Explicit override of a
+            # per-direction field is allowed only when profile.status reflects
+            # that the corresponding direction is owner-anchored.
+            if self.positive_evidence_status is DirectionEvidenceStatus.CONFIRMED:
+                raise ValueError(
+                    "ProfileStatus.UNKNOWN cannot have positive_evidence_status=CONFIRMED."
+                )
+            if self.negative_evidence_status is DirectionEvidenceStatus.CONFIRMED:
+                raise ValueError(
+                    "ProfileStatus.UNKNOWN cannot have negative_evidence_status=CONFIRMED."
+                )
+        return self
+
+    @pydantic.model_validator(mode="after")
+    def _validate_directions_in_domain(self) -> PowerSignProfile:
+        allowed = _allowed_directions(self.canonical_field)
+        if self.status is ProfileStatus.UNKNOWN:
+            pass
+        else:
+            if self.positive_means not in allowed:
+                raise ValueError(
+                    f"positive_means '{self.positive_means}' is not valid for "
+                    f"field '{self.canonical_field}'. Allowed: {sorted(d.value for d in allowed)}"
+                )
+            if self.negative_means not in allowed:
+                raise ValueError(
+                    f"negative_means '{self.negative_means}' is not valid for "
+                    f"field '{self.canonical_field}'. Allowed: {sorted(d.value for d in allowed)}"
+                )
+            if self.zero_means not in allowed and self.zero_means is not PowerDirection.NO_FLOW:
+                raise ValueError(
+                    f"zero_means '{self.zero_means}' is not valid for field '{self.canonical_field}'."
+                )
+        return self
+
+    @pydantic.model_validator(mode="after")
+    def _validate_confirmed_directions_are_distinct(self) -> PowerSignProfile:
+        if self.status is ProfileStatus.CONFIRMED and self.positive_means == self.negative_means:
+            raise ValueError(
+                "A confirmed profile must have distinct positive_means and negative_means."
+            )
+        return self
+
+    @pydantic.model_validator(mode="after")
+    def _validate_unsigned_field_negative_means(self) -> PowerSignProfile:
+        if (
+            (self.canonical_field in _PV_FIELDS or self.canonical_field in _LOAD_FIELDS)
+            and self.status is ProfileStatus.CONFIRMED
+            and self.negative_means
+            not in (
+                PowerDirection.UNKNOWN,
+                PowerDirection.NO_FLOW,
+            )
+        ):
+            raise ValueError(
+                f"Unsigned field '{self.canonical_field}' cannot have "
+                f"a confirmed negative_means of '{self.negative_means}'."
+            )
+        return self
+
+
+class PowerSignProfileRegistry:
+    def __init__(self) -> None:
+        self._profiles: list[PowerSignProfile] = []
+
+    @property
+    def profiles(self) -> tuple[PowerSignProfile, ...]:
+        return tuple(self._profiles)
+
+    @property
+    def count(self) -> int:
+        return len(self._profiles)
+
+    def register(self, profile: PowerSignProfile) -> None:
+        for existing in self._profiles:
+            if (
+                existing.plant_id == profile.plant_id
+                and existing.canonical_field == profile.canonical_field
+                and existing.source_system == profile.source_system
+                and existing.profile_version == profile.profile_version
+                and existing.valid_from == profile.valid_from
+                and existing.valid_to == profile.valid_to
+            ):
+                raise ValueError(
+                    f"Duplicate profile: plant_id='{profile.plant_id}', "
+                    f"field='{profile.canonical_field}', "
+                    f"source='{profile.source_system}', "
+                    f"version='{profile.profile_version}'."
+                )
+        for existing in self._profiles:
+            if (
+                existing.plant_id == profile.plant_id
+                and existing.canonical_field == profile.canonical_field
+                and existing.source_system == profile.source_system
+                and validity_intervals_overlap(
+                    first_start=existing.valid_from,
+                    first_end=existing.valid_to,
+                    second_start=profile.valid_from,
+                    second_end=profile.valid_to,
+                )
+            ):
+                raise ValueError(
+                    f"Overlapping validity intervals for "
+                    f"plant_id='{profile.plant_id}', "
+                    f"field='{profile.canonical_field}', "
+                    f"source='{profile.source_system}'. "
+                    f"Existing: [{existing.valid_from}, {existing.valid_to}), "
+                    f"New: [{profile.valid_from}, {profile.valid_to})."
+                )
+        self._profiles.append(profile)
+
+    def resolve(
+        self,
+        plant_id: str,
+        canonical_field: CanonicalPowerField,
+        source_system: SourceSystem,
+        timestamp: datetime,
+    ) -> PowerSignProfile | None:
+        if not is_timezone_aware(timestamp):
+            raise ValueError(f"resolve() requires timezone-aware timestamp, got naive: {timestamp}")
+        candidates: list[PowerSignProfile] = []
+        for profile in self._profiles:
+            if (
+                profile.plant_id == plant_id
+                and profile.canonical_field == canonical_field
+                and profile.source_system == source_system
+                and timestamp >= profile.valid_from
+                and (profile.valid_to is None or timestamp < profile.valid_to)
+            ):
+                candidates.append(profile)
+        if len(candidates) == 0:
+            return None
+        if len(candidates) > 1:
+            raise ValueError(
+                f"Ambiguous profile resolution: {len(candidates)} profiles "
+                f"match plant_id='{plant_id}', "
+                f"field='{canonical_field}', "
+                f"source='{source_system}', "
+                f"timestamp='{timestamp}'."
+            )
+        return candidates[0]
+
+
+# Moved to registry_seeds.py — see solgreen.energy.__init__.py re-export.

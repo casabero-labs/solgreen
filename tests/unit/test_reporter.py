@@ -128,9 +128,7 @@ def test_summarize_telemetry_uses_canonical_columns() -> None:
 def test_summarize_flow_with_quality_result() -> None:
     samples = parse_plant_flow(Path("tests/fixtures/flow_small.csv"))
     quality_result = analyze_plant_flow(samples, SourceType.SOLARMAN_PLANT_FLOW)
-    summary = summarize_flow(
-        samples, ("a", "b"), quality_result=quality_result
-    )
+    summary = summarize_flow(samples, ("a", "b"), quality_result=quality_result)
     assert summary.quality_result is quality_result
     assert summary.quality_result is not None
     assert summary.quality_result.quality_score == 1.0
@@ -139,9 +137,7 @@ def test_summarize_flow_with_quality_result() -> None:
 def test_summarize_telemetry_with_quality_result() -> None:
     samples = parse_inverter_telemetry(Path("tests/fixtures/telemetry_small.csv"))
     quality_result = analyze_telemetry(samples, SourceType.SOLARMAN_INVERTER_TELEMETRY)
-    summary = summarize_telemetry(
-        samples, ("a", "b"), quality_result=quality_result
-    )
+    summary = summarize_telemetry(samples, ("a", "b"), quality_result=quality_result)
     assert summary.quality_result is not None
     assert summary.quality_result.quality_score == 1.0
 
@@ -156,9 +152,7 @@ def test_write_report_json_includes_quality_analysis_when_present() -> None:
         "solarman_flow_csv",
         "casabero",
     )
-    batch = batch.model_copy(
-        update={"status": ImportStatus.PARSED, "quality_summary": summary}
-    )
+    batch = batch.model_copy(update={"status": ImportStatus.PARSED, "quality_summary": summary})
     sink = StringIO()
     write_report_json(batch, _validity_summary(samples), sink)
     payload = json.loads(sink.getvalue())
@@ -177,9 +171,7 @@ def test_write_report_markdown_includes_quality_score(tmp_path: Path) -> None:
         "solarman_flow_csv",
         "casabero",
     )
-    batch = batch.model_copy(
-        update={"status": ImportStatus.PARSED, "quality_summary": summary}
-    )
+    batch = batch.model_copy(update={"status": ImportStatus.PARSED, "quality_summary": summary})
     md_path = tmp_path / "report.md"
     write_report_markdown(batch, _validity_summary(samples), md_path)
     text = md_path.read_text(encoding="utf-8")

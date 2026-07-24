@@ -65,14 +65,22 @@ class TestValidateInterpretation:
 
     def test_invalid_evidence_ref_fails(self) -> None:
         interp = _valid_interp().model_copy(
-            update={"hypotheses": (Hypothesis(description="x", support_level="weak", evidence_refs=(99,)),)}
+            update={
+                "hypotheses": (
+                    Hypothesis(description="x", support_level="weak", evidence_refs=(99,)),
+                )
+            }
         )
         errors = validate_interpretation(interp, _input_with_one_fired())
         assert any("evidence_refs" in e for e in errors)
 
     def test_valid_evidence_ref_passes(self) -> None:
         interp = _valid_interp().model_copy(
-            update={"hypotheses": (Hypothesis(description="x", support_level="weak", evidence_refs=(0,)),)}
+            update={
+                "hypotheses": (
+                    Hypothesis(description="x", support_level="weak", evidence_refs=(0,)),
+                )
+            }
         )
         errors = validate_interpretation(interp, _input_with_one_fired())
         assert errors == []

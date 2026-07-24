@@ -1264,3 +1264,10 @@ class InverterTelemetrySample(BaseModel):
         if isinstance(value, int) and not isinstance(value, bool):
             return float(value)
         return None
+
+    def get_text(self, canonical_name: str) -> str | None:
+        value = self.signals.get(canonical_name)
+        if not isinstance(value, str):
+            return None
+        stripped = value.strip()
+        return stripped or None
