@@ -17,6 +17,12 @@ from solgreen.contracts import (
     SourceType,
 )
 from solgreen.contracts.validity import ValidityFlags, ValidityReason
+from solgreen.importer.normalize import (
+    MAX_INLINE_NORMALIZATION_RESULTS,
+    MAX_MD_WARNING_DETAILS,
+    NormalizationSummary,
+    NormalizedSignalResult,
+)
 from solgreen.quality._types import QualityResult
 from solgreen.timeline import CanonicalSample
 
@@ -98,6 +104,9 @@ def write_report_json(
     batch: ImportBatch,
     validity: dict[str, int],
     output: IO[str] | Path,
+    *,
+    norm_summary: NormalizationSummary | None = None,
+    norm_results: tuple[NormalizedSignalResult, ...] = (),
 ) -> None:
     payload: dict[str, object] = {
         "batch": batch.model_dump(mode="json"),
@@ -108,6 +117,25 @@ def write_report_json(
     }
     if batch.quality_summary is not None and batch.quality_summary.quality_result is not None:
         payload["quality_analysis"] = batch.quality_summary.quality_result.model_dump(mode="json")
+
+    if norm_summary is not None and norm_summary.eligible_count > 0:
+        norm_payload: dict[str, object] = {
+            "summary": norm_summary.model_dump(mode="json"),
+        }
+        if norm_summary.eligible_count > 0:
+            if len(norm_results) <= MAX_INLINE_NORMALIZATION_RESULTS:
+                norm_payload["results"] = [r.model_dump(mode="json") for r in norm_results]
+                norm_payload["results_artifact"] = None
+            else:
+                norm_payload["results"] = []
+                norm_payload["results_artifact"] = _write_normalization_artifact(
+                    output, norm_results
+                )
+        else:
+            norm_payload["results"] = []
+            norm_payload["results_artifact"] = None
+        payload["normalization"] = norm_payload
+
     text = json.dumps(payload, indent=2, ensure_ascii=False)
     if isinstance(output, Path):
         output.write_text(text, encoding="utf-8")
@@ -119,6 +147,9 @@ def write_report_markdown(
     batch: ImportBatch,
     validity: dict[str, int],
     output: IO[str] | Path,
+    *,
+    norm_summary: NormalizationSummary | None = None,
+    norm_results: tuple[NormalizedSignalResult, ...] = (),
 ) -> None:
     md_lines = [
         "# Solgreen import report",
@@ -158,6 +189,10 @@ def write_report_markdown(
                 md_lines.append(f"- `{reason}`: {count}")
         else:
             md_lines.append("- (none)")
+
+    if norm_summary is not None and norm_summary.eligible_count > 0:
+        _append_normalization_markdown(md_lines, norm_summary, norm_results)
+
     text = "\n".join(md_lines) + "\n"
     if isinstance(output, Path):
         output.write_text(text, encoding="utf-8")
@@ -171,6 +206,93 @@ def empty_validity_flags() -> ValidityFlags:
 
 def parse_error_flags() -> ValidityFlags:
     return ValidityFlags().with_reason(ValidityReason.PARSE_ERROR)
+
+
+def _write_normalization_artifact(
+    output: IO[str] | Path,
+    norm_results: tuple[NormalizedSignalResult, ...],
+) -> str:
+    if isinstance(output, Path):
+        artifact_path = output.with_suffix(".normalization.json")
+    else:
+        artifact_path = Path("out.normalization.json")
+
+    results_payload = [r.model_dump(mode="json") for r in norm_results]
+    text = json.dumps(results_payload, indent=2, ensure_ascii=False)
+    artifact_path.write_text(text, encoding="utf-8")
+    return str(artifact_path)
+
+
+def _append_normalization_markdown(
+    md_lines: list[str],
+    norm_summary: NormalizationSummary,
+    norm_results: tuple[NormalizedSignalResult, ...],
+) -> None:
+    invariant_ok = _check_summary_invariant(norm_summary)
+    md_lines.append("")
+    md_lines.append("## Sign Normalization")
+    md_lines.append("")
+    md_lines.append(f"- Eligible: {norm_summary.eligible_count}")
+    md_lines.append(f"- Missing: {norm_summary.missing_count}")
+    md_lines.append(f"- Results: {norm_summary.result_count}")
+    md_lines.append(f"- Normalized: {norm_summary.normalized_count}")
+    md_lines.append(f"- Not confirmed: {norm_summary.not_confirmed_count}")
+    md_lines.append(f"- Not found: {norm_summary.not_found_count}")
+    md_lines.append(f"- Errors: {norm_summary.error_count}")
+    md_lines.append(f"- Warnings: {norm_summary.warning_count}")
+    md_lines.append(f"- Invariant: {'OK' if invariant_ok else 'FAILED'}")
+
+    warnings = [r for r in norm_results if _result_is_warning(r)]
+
+    if warnings:
+        md_lines.append("")
+        md_lines.append(f"### Warning details (sample, max {MAX_MD_WARNING_DETAILS})")
+        md_lines.append("")
+        md_lines.append("| Signal | Timestamp | Status | Detail |")
+        md_lines.append("|--------|-----------|--------|--------|")
+        for w in warnings[:MAX_MD_WARNING_DETAILS]:
+            ts = w.timestamp_utc.isoformat()
+            status = w.normalization.status.value
+            detail = ""
+            if w.normalization.warnings:
+                detail = "; ".join(w.normalization.warnings)
+            elif w.normalization.status.value == "profile_not_confirmed":
+                detail = "direction evidence not CONFIRMED"
+            elif w.normalization.status.value == "profile_not_found":
+                detail = "no profile for timestamp"
+            else:
+                detail = w.normalization.status.value
+            md_lines.append(f"| `{w.raw_signal_name}` | {ts} | `{status}` | {detail} |")
+
+
+def _result_is_warning(result: NormalizedSignalResult) -> bool:
+    status = result.normalization.status.value
+    has_warnings = bool(result.normalization.warnings)
+    if status == "normalized" and has_warnings:
+        return True
+    if status in ("profile_not_confirmed", "profile_not_found"):
+        return True
+    error_statuses = {
+        "nonfinite_value",
+        "field_mismatch",
+        "invalid_unsigned_negative",
+    }
+    return status in error_statuses
+
+
+def _check_summary_invariant(summary: NormalizationSummary) -> bool:
+    total = (
+        summary.missing_count
+        + summary.normalized_count
+        + summary.not_confirmed_count
+        + summary.not_found_count
+        + summary.error_count
+    )
+    if summary.eligible_count != total:
+        return False
+    if summary.result_count != summary.eligible_count - summary.missing_count:
+        return False
+    return summary.warning_count <= summary.result_count
 
 
 class _TimelineSummaryForReport:
