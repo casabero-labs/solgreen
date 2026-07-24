@@ -55,7 +55,12 @@ SUPPORTED_SERIES: tuple[tuple[CanonicalPowerField, PowerDirection], ...] = (
 class SolarmanPersistedSignalRow(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
+    snapshot_id: int
     collection_time: datetime
+    plant_id: str
+    station_id: str
+    device_sn: str
+    signal_key: str
     canonical_field: CanonicalPowerField
     source_system: SourceSystem
     normalized_status: NormalizationStatus
@@ -94,22 +99,6 @@ class SolarmanPersistedSignalRow(BaseModel):
         return self
 
 
-def _map_row_to_directional_power(
-    row: SolarmanPersistedSignalRow,
-) -> tuple[PowerDirection, float | None]:
-    if row.grid_import_w is not None:
-        return PowerDirection.GRID_IMPORT, row.grid_import_w
-    if row.grid_export_w is not None:
-        return PowerDirection.GRID_EXPORT, row.grid_export_w
-    if row.battery_charge_w is not None:
-        return PowerDirection.BATTERY_CHARGE, row.battery_charge_w
-    if row.battery_discharge_w is not None:
-        return PowerDirection.BATTERY_DISCHARGE, row.battery_discharge_w
-    if row.pv_generation_w is not None:
-        return PowerDirection.PV_GENERATION, row.pv_generation_w
-    return PowerDirection.UNKNOWN, None
-
-
 def adapt_persisted_row_to_observation(
     row: SolarmanPersistedSignalRow,
     series_direction: PowerDirection,
@@ -130,18 +119,13 @@ def adapt_persisted_row_to_observation(
                 lineage=("solarman_db_row",),
             )
 
-        direction, magnitude = _map_row_to_directional_power(row)
-
-        if direction is not series_direction:
-            raise ValueError(
-                f"Row direction {direction.value} does not match series direction "
-                f"{series_direction.value}."
-            )
+        field_name = _DIRECTIONAL_POWER_FIELD_MAP[series_direction]
+        magnitude = getattr(row, field_name)
 
         if magnitude is None:
             raise ValueError(
-                f"Normalized row has no directional magnitude for direction "
-                f"{series_direction.value}. Data integrity error."
+                f"Normalized row has no magnitude for direction "
+                f"{series_direction.value} (field={field_name}). Data integrity error."
             )
 
         if not math.isfinite(magnitude):
@@ -327,12 +311,15 @@ def build_energy_context(
 
 def load_persisted_signal_rows(
     conn: Any,
+    *,
     plant_id: str,
     station_id: str,
+    device_sn: str,
     canonical_field: CanonicalPowerField,
+    source_system: SourceSystem,
     period_start: datetime,
     period_end: datetime,
-) -> list[SolarmanPersistedSignalRow]:
+) -> tuple[SolarmanPersistedSignalRow, ...]:
     if not is_timezone_aware(period_start):
         raise ValueError("period_start must be timezone-aware.")
     if not is_timezone_aware(period_end):
@@ -342,7 +329,12 @@ def load_persisted_signal_rows(
         cur.execute(
             """
             SELECT
+                ss.id,
                 ss.collection_time,
+                ss.plant_id,
+                ss.station_id,
+                ss.device_sn,
+                ns.signal_key,
                 ns.canonical_field,
                 ns.source_system,
                 ns.normalized_status,
@@ -357,19 +349,34 @@ def load_persisted_signal_rows(
             JOIN solarman_snapshots ss ON ss.id = ns.snapshot_id
             WHERE ss.plant_id = %s
               AND ss.station_id = %s
+              AND ss.device_sn = %s
               AND ns.canonical_field = %s
+              AND ns.source_system = %s
               AND ss.collection_time >= %s
               AND ss.collection_time <= %s
-            ORDER BY ss.collection_time ASC
+            ORDER BY ss.collection_time ASC, ss.id ASC, ns.id ASC
             """,
-            (plant_id, station_id, canonical_field.value, period_start, period_end),
+            (
+                plant_id,
+                station_id,
+                device_sn,
+                canonical_field.value,
+                source_system.value,
+                period_start,
+                period_end,
+            ),
         )
         rows = cur.fetchall()
 
     observations: list[SolarmanPersistedSignalRow] = []
     for row in rows:
         (
+            snapshot_id,
             collection_time,
+            plant_id_row,
+            station_id_row,
+            device_sn_row,
+            signal_key,
             cf_val,
             source_val,
             norm_status_val,
@@ -384,19 +391,31 @@ def load_persisted_signal_rows(
 
         try:
             status = NormalizationStatus(norm_status_val)
-        except ValueError:
-            logger.warning(
-                "Unknown normalization status %r for row at %s, treating as error",
-                norm_status_val,
-                collection_time,
-            )
-            status = NormalizationStatus.NORMALIZED
+        except ValueError as err:
+            raise ValueError(
+                f"Unknown persisted normalization status: {norm_status_val!r}"
+            ) from err
+
+        try:
+            canonical = CanonicalPowerField(cf_val)
+        except ValueError as err:
+            raise ValueError(f"Unknown persisted canonical field: {cf_val!r}") from err
+
+        try:
+            source = SourceSystem(source_val)
+        except ValueError as err:
+            raise ValueError(f"Unknown persisted source system: {source_val!r}") from err
 
         observations.append(
             SolarmanPersistedSignalRow(
+                snapshot_id=snapshot_id,
                 collection_time=collection_time,
-                canonical_field=CanonicalPowerField(cf_val),
-                source_system=SourceSystem(source_val),
+                plant_id=plant_id_row,
+                station_id=station_id_row,
+                device_sn=device_sn_row,
+                signal_key=signal_key,
+                canonical_field=canonical,
+                source_system=source,
                 normalized_status=status,
                 sign_profile_version=profile_version,
                 grid_import_w=grid_import_w,
@@ -408,13 +427,14 @@ def load_persisted_signal_rows(
             )
         )
 
-    return observations
+    return tuple(observations)
 
 
 def run_energy_integration(
     conn: Any,
     plant_id: str,
     station_id: str,
+    device_sn: str,
     context: SolarmanEnergyIntegrationContext,
     period_start: datetime,
     period_end: datetime,
@@ -437,17 +457,20 @@ def run_energy_integration(
                 conn=conn,
                 plant_id=plant_id,
                 station_id=station_id,
+                device_sn=device_sn,
                 canonical_field=canonical_field,
+                source_system=SourceSystem.INVERTER_TELEMETRY,
                 period_start=period_start,
                 period_end=period_end,
             )
 
+            series = EnergySeriesIdentity(
+                source_field=canonical_field,
+                source_system=SourceSystem.INVERTER_TELEMETRY,
+                direction=direction,
+            )
+
             if not rows:
-                series = EnergySeriesIdentity(
-                    source_field=canonical_field,
-                    source_system=SourceSystem.INVERTER_TELEMETRY,
-                    direction=direction,
-                )
                 empty_result = integrate_energy(
                     series=series,
                     observations=[],
@@ -463,12 +486,6 @@ def run_energy_integration(
             for row in rows:
                 obs = adapt_persisted_row_to_observation(row, direction)
                 observations.append(obs)
-
-            series = EnergySeriesIdentity(
-                source_field=canonical_field,
-                source_system=SourceSystem.INVERTER_TELEMETRY,
-                direction=direction,
-            )
 
             result = integrate_energy(
                 series=series,
