@@ -3,13 +3,13 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass, field
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from solgreen.energy.normalization import (
     NormalizationStatus,
     normalize_power_value,
 )
-from solgreen.energy.sign_profiles import SourceSystem
+from solgreen.energy.sign_profiles import CanonicalPowerField, SourceSystem
 from solgreen.importer.normalize import ImportNormalizationContext, SignNormalizationMode
 from solgreen.integrations.solarman.client import SolarmanClient
 from solgreen.integrations.solarman.models import CurrentDataRecord
@@ -19,6 +19,9 @@ from solgreen.integrations.solarman.snapshot import (
     SolarmanSnapshot,
     parse_current_data_to_snapshot,
 )
+
+if TYPE_CHECKING:
+    from solgreen.integrations.solarman.energy_runtime import SolarmanEnergyRuntimeResult
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +40,10 @@ class DeviceSyncResult:
     authorized_not_found: int = 0
     authorized_errors: int = 0
     error: str | None = None
+    energy_series_attempted: int = 0
+    energy_series_succeeded: int = 0
+    energy_series_failed: int = 0
+    energy_result: SolarmanEnergyRuntimeResult | None = None
 
 
 @dataclass
@@ -53,6 +60,10 @@ class SyncResult:
     error_count: int = 0
     device_results: list[DeviceSyncResult] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
+    energy_series_attempted: int = 0
+    energy_series_succeeded: int = 0
+    energy_series_failed: int = 0
+    energy_profile_version: str | None = None
 
     @property
     def success(self) -> bool:
@@ -93,6 +104,7 @@ def sync_solarman_station(
     plant_id: str,
     norm_ctx: ImportNormalizationContext | None = None,
     conn: Any | None = None,
+    energy_ctx: Any | None = None,
 ) -> SyncResult:
     try:
         devices = client.list_station_devices(station_id)
@@ -106,15 +118,18 @@ def sync_solarman_station(
         plant_id=plant_id,
         devices_queried=len(devices),
     )
+    if energy_ctx is not None and energy_ctx.mode.name != "OFF":
+        result.energy_profile_version = energy_ctx.profile_version
 
     for device in devices:
-        device_result = _sync_device(
+        device_result, _snap_time = _sync_device(
             client=client,
             device_info=device,
             station_id=station_id,
             plant_id=plant_id,
             norm_ctx=norm_ctx,
             conn=conn,
+            energy_ctx=energy_ctx,
         )
         result.device_results.append(device_result)
         if device_result.error is None:
@@ -127,6 +142,9 @@ def sync_solarman_station(
         result.not_confirmed_count += device_result.authorized_not_confirmed
         result.not_found_count += device_result.authorized_not_found
         result.error_count += device_result.authorized_errors
+        result.energy_series_attempted += device_result.energy_series_attempted
+        result.energy_series_succeeded += device_result.energy_series_succeeded
+        result.energy_series_failed += device_result.energy_series_failed
         if device_result.error:
             result.errors.append(f"{device_result.device_sn}: {device_result.error}")
 
@@ -140,24 +158,25 @@ def _sync_device(
     plant_id: str,
     norm_ctx: ImportNormalizationContext | None,
     conn: Any | None,
-) -> DeviceSyncResult:
+    energy_ctx: Any | None,
+) -> tuple[DeviceSyncResult, Any]:
     device_id = getattr(device_info, "device_id", None)
     device_sn = getattr(device_info, "device_sn", "unknown")
 
     if not device_id:
-        return DeviceSyncResult(device_sn=device_sn, error="missing device_id")
+        return DeviceSyncResult(device_sn=device_sn, error="missing device_id"), None
 
     try:
         current_data: CurrentDataRecord = client.get_device_current_data(device_id)
     except Exception as exc:
-        return DeviceSyncResult(device_sn=device_sn, error=str(exc))
+        return DeviceSyncResult(device_sn=device_sn, error=str(exc)), None
 
     data_sn = current_data.device_sn or device_sn
 
     try:
         _validate_timestamp(current_data.collection_time)
     except ValueError as exc:
-        return DeviceSyncResult(device_sn=data_sn, error=f"invalid timestamp: {exc}")
+        return DeviceSyncResult(device_sn=data_sn, error=f"invalid timestamp: {exc}"), None
 
     result = DeviceSyncResult(device_sn=data_sn)
     data_list = current_data.data_list or []
@@ -174,7 +193,7 @@ def _sync_device(
         )
     except Exception as exc:
         result.error = f"snapshot parse: {exc}"
-        return result
+        return result, None
 
     result.signal_count = len(snapshot.signals)
 
@@ -191,9 +210,40 @@ def _sync_device(
             result.normalized_skipped = cast(int, saved.get("normalized_skipped", 0))
         except Exception as exc:
             result.error = f"persist: {exc}"
-            return result
+            return result, None
 
-    return result
+        if (
+            energy_ctx is not None
+            and energy_ctx.mode.name != "OFF"
+            and saved is not None
+            and snapshot.collection_time is not None
+        ):
+            from solgreen.integrations.solarman.energy_runtime import (
+                run_energy_integration,
+            )
+
+            period_end = snapshot.collection_time
+            period_start = period_end - energy_ctx.lookback
+            try:
+                energy_result = run_energy_integration(
+                    conn=conn,
+                    plant_id=plant_id,
+                    station_id=station_id,
+                    device_sn=data_sn,
+                    context=energy_ctx,
+                    period_start=period_start,
+                    period_end=period_end,
+                )
+                result.energy_result = energy_result
+                result.energy_series_attempted = energy_result.series_attempted
+                result.energy_series_succeeded = energy_result.series_succeeded
+                result.energy_series_failed = energy_result.series_failed
+            except Exception as exc:
+                logger.warning("Device %s energy integration failed: %s", data_sn, exc)
+                result.energy_series_attempted = 5
+                result.energy_series_failed = 5
+
+    return result, snapshot.collection_time
 
 
 def _normalize_snapshot(
@@ -231,6 +281,27 @@ def _normalize_snapshot(
         if status is NormalizationStatus.MISSING_VALUE:
             continue
 
+        grid_import_w: float | None = direction.grid_import_w
+        grid_export_w: float | None = direction.grid_export_w
+        battery_charge_w: float | None = direction.battery_charge_w
+        battery_discharge_w: float | None = direction.battery_discharge_w
+
+        if status is NormalizationStatus.NORMALIZED:
+            if canonical_field == CanonicalPowerField.TELEMETRY_GRID:
+                if grid_import_w is None and grid_export_w is None:
+                    pass
+                elif grid_import_w is not None and grid_export_w is None:
+                    grid_export_w = 0.0
+                elif grid_export_w is not None and grid_import_w is None:
+                    grid_import_w = 0.0
+            elif canonical_field == CanonicalPowerField.TELEMETRY_BATTERY:
+                if battery_charge_w is None and battery_discharge_w is None:
+                    pass
+                elif battery_charge_w is not None and battery_discharge_w is None:
+                    battery_discharge_w = 0.0
+                elif battery_discharge_w is not None and battery_charge_w is None:
+                    battery_charge_w = 0.0
+
         entries.append(
             {
                 "signal_key": api_key,
@@ -238,10 +309,11 @@ def _normalize_snapshot(
                 "source_system": direction.source_system.value,
                 "raw_power_w": direction.raw_power_w,
                 "normalized_status": direction.status.value,
-                "grid_import_w": direction.grid_import_w,
-                "grid_export_w": direction.grid_export_w,
-                "battery_charge_w": direction.battery_charge_w,
-                "battery_discharge_w": direction.battery_discharge_w,
+                "sign_profile_version": direction.profile_version,
+                "grid_import_w": grid_import_w,
+                "grid_export_w": grid_export_w,
+                "battery_charge_w": battery_charge_w,
+                "battery_discharge_w": battery_discharge_w,
                 "pv_generation_w": direction.pv_generation_w,
                 "load_consumption_w": direction.load_consumption_w,
                 "warnings": json.dumps(list(direction.warnings)) if direction.warnings else None,
@@ -318,12 +390,12 @@ def _persist_snapshot(
                     """
                     INSERT INTO solarman_normalized_signals
                         (snapshot_id, signal_key, canonical_field, source_system,
-                         raw_power_w, normalized_status,
+                         raw_power_w, normalized_status, sign_profile_version,
                          grid_import_w, grid_export_w,
                          battery_charge_w, battery_discharge_w,
                          pv_generation_w, load_consumption_w,
                          warnings, within_zero_deadband)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT (snapshot_id, signal_key) DO NOTHING
                     RETURNING id
                     """,
@@ -334,6 +406,7 @@ def _persist_snapshot(
                         entry["source_system"],
                         entry["raw_power_w"],
                         entry["normalized_status"],
+                        entry["sign_profile_version"],
                         entry["grid_import_w"],
                         entry["grid_export_w"],
                         entry["battery_charge_w"],

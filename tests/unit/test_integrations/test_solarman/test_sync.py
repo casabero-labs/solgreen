@@ -245,6 +245,7 @@ class TestPersistenceMocks:
                 "source_system": "inverter_telemetry",
                 "raw_power_w": 1200.0,
                 "normalized_status": "normalized",
+                "sign_profile_version": "legacy_v1",
                 "grid_import_w": None,
                 "grid_export_w": None,
                 "battery_charge_w": None,
@@ -698,6 +699,9 @@ class TestSyncCliFlags:
         mock_result.normalized_count = 0
         mock_result.not_found_count = 0
         mock_result.error_count = 0
+        mock_result.energy_series_attempted = 0
+        mock_result.energy_series_succeeded = 0
+        mock_result.energy_series_failed = 0
 
         with (
             patch(
@@ -756,6 +760,9 @@ class TestSyncCliFlags:
         mock_result.normalized_count = 0
         mock_result.not_found_count = 0
         mock_result.error_count = 1
+        mock_result.energy_series_attempted = 0
+        mock_result.energy_series_succeeded = 0
+        mock_result.energy_series_failed = 0
 
         with (
             patch(
@@ -808,6 +815,9 @@ class TestSyncCliFlags:
         mock_result.normalized_count = 5
         mock_result.not_found_count = 0
         mock_result.error_count = 0
+        mock_result.energy_series_attempted = 0
+        mock_result.energy_series_succeeded = 0
+        mock_result.energy_series_failed = 0
 
         close_called_during_sync = []
 
@@ -876,6 +886,9 @@ class TestSyncCliFlags:
         mock_result.normalized_count = 0
         mock_result.not_found_count = 0
         mock_result.error_count = 3
+        mock_result.energy_series_attempted = 0
+        mock_result.energy_series_succeeded = 0
+        mock_result.energy_series_failed = 0
 
         with (
             patch(
@@ -960,3 +973,146 @@ class TestSyncSkippedLocked:
                     )
 
                     assert result.exit_code == 0
+
+
+class TestDeviceEnergyResultRetention:
+    def test_energy_result_field_exists(self) -> None:
+        from solgreen.integrations.solarman.sync import DeviceSyncResult
+
+        d = DeviceSyncResult(device_sn="D001")
+        assert hasattr(d, "energy_result")
+        assert d.energy_result is None
+        assert d.energy_series_attempted == 0
+
+    def test_energy_profile_version_on_sync_result(self) -> None:
+        from solgreen.integrations.solarman.sync import SyncResult
+
+        r = SyncResult(station_id="S1", plant_id="P1", devices_queried=1)
+        assert r.energy_profile_version is None
+
+
+class TestComplementaryZeroNormalizedOnly:
+    def test_normalized_grid_import_produces_export_zero(self) -> None:
+        from unittest.mock import MagicMock, patch
+
+        from solgreen.integrations.solarman.snapshot import SolarmanSnapshot
+        from solgreen.integrations.solarman.sync import _normalize_snapshot
+
+        snapshot = MagicMock(spec=SolarmanSnapshot)
+        snapshot.collection_time = 1700000000
+        sig = MagicMock()
+        sig.value = 1200.0
+        sig.unit = "W"
+        snapshot.signals = {"current": sig}
+
+        norm_ctx = MagicMock()
+        norm_ctx.plant_id = "P1"
+        norm_ctx.sign_registry = MagicMock()
+        norm_ctx.registry_mode = "d10"
+
+        from solgreen.energy.normalization import DirectionalPowerResult, NormalizationStatus
+        from solgreen.energy.sign_profiles import (
+            AuthorityClass,
+            CanonicalPowerField,
+            ProfileStatus,
+            SourceSystem,
+        )
+
+        result = DirectionalPowerResult(
+            canonical_field=CanonicalPowerField.TELEMETRY_GRID,
+            source_system=SourceSystem.INVERTER_TELEMETRY,
+            authority_class=AuthorityClass.OPERATIONAL,
+            raw_power_w=1200.0,
+            status=NormalizationStatus.NORMALIZED,
+            profile_version="v1",
+            profile_status=ProfileStatus.CONFIRMED,
+            grid_import_w=1200.0,
+        )
+        norm_ctx.sign_registry.normalize_power_value = MagicMock(return_value=result)
+
+        from solgreen.integrations.solarman.sync import DeviceSyncResult
+
+        dev = DeviceSyncResult(device_sn="D001")
+
+        with (
+            patch(
+                "solgreen.integrations.solarman.sync.API_KEY_TO_CANONICAL_FIELD",
+                {"current": CanonicalPowerField.TELEMETRY_GRID},
+            ),
+            patch(
+                "solgreen.integrations.solarman.sync.SYNC_AUTHORIZED_KEYS",
+                ["current"],
+            ),
+            patch(
+                "solgreen.integrations.solarman.sync.normalize_power_value",
+                return_value=result,
+            ),
+            patch(
+                "solgreen.integrations.solarman.sync.SourceSystem",
+                wraps=SourceSystem,
+            ),
+        ):
+            entries = _normalize_snapshot(snapshot, norm_ctx, dev)
+            assert len(entries) == 1
+            assert entries[0]["grid_import_w"] == 1200.0
+            assert entries[0]["grid_export_w"] == 0.0
+
+    def test_profile_not_confirmed_persists_no_directional_values(self) -> None:
+        from unittest.mock import MagicMock, patch
+
+        from solgreen.energy.normalization import DirectionalPowerResult, NormalizationStatus
+        from solgreen.energy.sign_profiles import (
+            AuthorityClass,
+            CanonicalPowerField,
+            SourceSystem,
+        )
+        from solgreen.integrations.solarman.snapshot import SolarmanSnapshot
+        from solgreen.integrations.solarman.sync import _normalize_snapshot
+
+        snapshot = MagicMock(spec=SolarmanSnapshot)
+        snapshot.collection_time = 1700000000
+        sig = MagicMock()
+        sig.value = 1200.0
+        sig.unit = "W"
+        snapshot.signals = {"current": sig}
+
+        result = DirectionalPowerResult(
+            canonical_field=CanonicalPowerField.TELEMETRY_GRID,
+            source_system=SourceSystem.INVERTER_TELEMETRY,
+            authority_class=AuthorityClass.OPERATIONAL,
+            raw_power_w=1200.0,
+            status=NormalizationStatus.PROFILE_NOT_CONFIRMED,
+            profile_version="v1",
+        )
+
+        norm_ctx = MagicMock()
+        norm_ctx.plant_id = "P1"
+        norm_ctx.sign_registry = MagicMock()
+        norm_ctx.registry_mode = "d10"
+
+        from solgreen.integrations.solarman.sync import DeviceSyncResult
+
+        dev = DeviceSyncResult(device_sn="D001")
+
+        with (
+            patch(
+                "solgreen.integrations.solarman.sync.API_KEY_TO_CANONICAL_FIELD",
+                {"current": CanonicalPowerField.TELEMETRY_GRID},
+            ),
+            patch(
+                "solgreen.integrations.solarman.sync.SYNC_AUTHORIZED_KEYS",
+                ["current"],
+            ),
+            patch(
+                "solgreen.integrations.solarman.sync.normalize_power_value",
+                return_value=result,
+            ),
+            patch(
+                "solgreen.integrations.solarman.sync.SourceSystem",
+                wraps=SourceSystem,
+            ),
+        ):
+            entries = _normalize_snapshot(snapshot, norm_ctx, dev)
+            assert len(entries) == 1
+            assert entries[0]["grid_import_w"] is None
+            assert entries[0]["grid_export_w"] is None

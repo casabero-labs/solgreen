@@ -860,6 +860,46 @@ def solarman_sync(
             help="ISO 8601 cutover timestamp for d10 mode.",
         ),
     ] = None,
+    energy_integration_mode: Annotated[
+        str | None,
+        typer.Option(
+            "--energy-integration-mode",
+            envvar="SOLGREEN_ENERGY_INTEGRATION_MODE",
+            help="Energy integration mode: off or instantaneous.",
+        ),
+    ] = None,
+    energy_profile_version: Annotated[
+        str | None,
+        typer.Option(
+            "--energy-profile-version",
+            envvar="SOLGREEN_ENERGY_PROFILE_VERSION",
+            help="Explicit sign-profile version for energy integration.",
+        ),
+    ] = None,
+    energy_expected_interval: Annotated[
+        str | None,
+        typer.Option(
+            "--energy-expected-interval",
+            envvar="SOLGREEN_ENERGY_EXPECTED_INTERVAL",
+            help="Expected sampling interval as ISO timedelta (e.g. PT5M).",
+        ),
+    ] = None,
+    energy_max_interval: Annotated[
+        str | None,
+        typer.Option(
+            "--energy-max-interval",
+            envvar="SOLGREEN_ENERGY_MAX_INTERVAL",
+            help="Maximum authorized gap as ISO timedelta (e.g. PT15M).",
+        ),
+    ] = None,
+    energy_lookback: Annotated[
+        str | None,
+        typer.Option(
+            "--energy-lookback",
+            envvar="SOLGREEN_ENERGY_LOOKBACK",
+            help="Lookback window as ISO timedelta (e.g. PT1H).",
+        ),
+    ] = None,
     json_output: Annotated[
         bool,
         typer.Option("--json", help="Machine-readable JSON output."),
@@ -872,6 +912,7 @@ def solarman_sync(
     from solgreen.db.advisory_lock import LockStatus, acquire_sync_lock
     from solgreen.db.connection import get_connection
     from solgreen.integrations.solarman.client import SolarmanClient
+    from solgreen.integrations.solarman.energy_runtime import build_energy_context
     from solgreen.integrations.solarman.settings import build_settings_from_env
     from solgreen.integrations.solarman.station_resolver import (
         StationResolutionError,
@@ -881,18 +922,58 @@ def solarman_sync(
     )
     from solgreen.integrations.solarman.sync import sync_solarman_station
 
-    start_ms = int(time.time() * 1000)
-    settings = build_settings_from_env()
-    client = SolarmanClient(settings)
+    energy_ctx = build_energy_context(
+        cli_mode=energy_integration_mode,
+        env_mode=None,
+        cli_profile_version=energy_profile_version,
+        env_profile_version=None,
+        cli_expected_interval=energy_expected_interval,
+        env_expected_interval=None,
+        cli_max_interval=energy_max_interval,
+        env_max_interval=None,
+        cli_lookback=energy_lookback,
+        env_lookback=None,
+    )
 
-    sync_exc: Exception | None = None
-    lock_exc: Exception | None = None
-    conn = None
+    norm_ctx = build_normalization_context(
+        cli_mode=sign_normalization_mode,
+        cli_effective_from=sign_registry_effective_from,
+        plant_id=plant_id,
+    )
+
+    if energy_ctx.mode.value != "off":
+        if norm_ctx.registry_mode.value == "off":
+            raise typer.BadParameter(
+                "Energy integration requires sign normalization to be enabled "
+                "(sign normalization mode cannot be off)."
+            )
+        if no_db:
+            raise typer.BadParameter(
+                "Energy integration requires database persistence (--no-db is incompatible)."
+            )
+        if db_url is None:
+            raise typer.BadParameter(
+                "Energy integration requires --db-url (or SOLGREEN_DATABASE_URL) to be set."
+            )
+
+    persist = not no_db and db_url is not None and not dry_run
+
+    conn = get_connection(db_url) if persist else None
+
     lock = None
+    lock_exc: Exception | None = None
     resolved_id = ""
     masked_id = ""
+    start_ms = int(time.time() * 1000)
+    sync_exc: Exception | None = None
+    result: Any = None
+    settings: Any = None
+    client: SolarmanClient | None = None
 
     try:
+        settings = build_settings_from_env()
+        client = SolarmanClient(settings)
+
         resolved = resolve_station(
             client,
             explicit_station_id=station_id,
@@ -901,16 +982,7 @@ def solarman_sync(
         resolved_id = resolved.station_id
         masked_id = resolved.masked_id
 
-        norm_ctx = build_normalization_context(
-            cli_mode=sign_normalization_mode,
-            cli_effective_from=sign_registry_effective_from,
-            plant_id=plant_id,
-        )
-
-        persist = not no_db and db_url is not None
-
-        if persist and not dry_run:
-            conn = get_connection(db_url)
+        if not dry_run and persist:
             lock, lock_status = acquire_sync_lock(conn, plant_id, resolved_id)
             if lock_status == LockStatus.BUSY:
                 _sync_skipped_locked(
@@ -940,6 +1012,7 @@ def solarman_sync(
                 plant_id=plant_id,
                 norm_ctx=norm_ctx,
                 conn=dry_conn,
+                energy_ctx=energy_ctx,
             )
         except Exception as exc:
             sync_exc = exc
@@ -1002,7 +1075,7 @@ def solarman_sync(
         if result.devices_queried == 0 or result.devices_succeeded == 0:
             status = "FAILED"
             exit_code = 1
-        elif result.errors or result.not_confirmed_count > 0:
+        elif result.errors or result.not_confirmed_count > 0 or result.energy_series_failed > 0:
             status = "PARTIAL_SUCCESS"
             exit_code = 0
         else:
@@ -1033,10 +1106,12 @@ def solarman_sync(
         raise typer.Exit(code=1) from None
 
     finally:
+        if client is not None:
+            with contextlib.suppress(Exception):
+                client.close()
         if conn is not None:
             with contextlib.suppress(Exception):
                 conn.close()
-        client.close()
 
 
 def _sync_success(
@@ -1069,6 +1144,17 @@ def _sync_success(
     if result.errors:
         sanitized_errors = [sanitize_error(str(error)) for error in result.errors[:10]]
         output["errors"] = sanitized_errors
+
+    if result.energy_series_attempted > 0:
+        output["energy_integration"] = {
+            "enabled": True,
+            "profile_version": result.energy_profile_version,
+            "series_attempted": result.energy_series_attempted,
+            "series_succeeded": result.energy_series_succeeded,
+            "series_failed": result.energy_series_failed,
+            "results_persisted": False,
+        }
+
     if json_output:
         typer.echo(json.dumps(output))
     else:
@@ -1083,6 +1169,11 @@ def _sync_success(
         typer.echo(f"Not confirmed: {result.not_confirmed_count}")
         typer.echo(f"Not found: {result.not_found_count}")
         typer.echo(f"Error count: {result.error_count}")
+        if result.energy_series_attempted > 0:
+            typer.echo(
+                f"Energy integration: "
+                f"{result.energy_series_succeeded}/{result.energy_series_attempted} series succeeded"
+            )
         if result.errors:
             typer.echo(f"Errors: {len(result.errors)}")
             for err in sanitized_errors[:5]:
