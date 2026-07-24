@@ -438,3 +438,41 @@ def test_cli_import_align_with_db_persists_episodes(tmp_path: Path) -> None:
     assert "persisted to database" in result.output
     assert len(mock_repo.batches) == 2
     assert len(mock_repo.samples) >= 1
+
+
+class TestDbMigrateCommand:
+    def test_db_migrate_registered(self) -> None:
+        result = runner.invoke(app, ["db", "migrate", "--help"])
+        assert result.exit_code == 0
+        assert "migrate" in result.stdout.lower()
+
+    def test_db_migrate_help_shows_options(self) -> None:
+        result = runner.invoke(app, ["db", "migrate", "--help"])
+        assert result.exit_code == 0
+        assert "--db-url" in result.stdout
+        assert "--migrations-dir" in result.stdout
+        assert "--to" in result.stdout
+        assert "--dry-run" in result.stdout
+        assert "--json" in result.stdout
+
+    def test_db_migrate_json_no_db_url_error(self) -> None:
+        result = runner.invoke(app, ["db", "migrate", "--json"])
+        assert result.exit_code != 0
+
+
+class TestDbStatusCommand:
+    def test_db_status_registered(self) -> None:
+        result = runner.invoke(app, ["db", "status", "--help"])
+        assert result.exit_code == 0
+        assert "status" in result.stdout.lower()
+
+    def test_db_status_help_shows_options(self) -> None:
+        result = runner.invoke(app, ["db", "status", "--help"])
+        assert result.exit_code == 0
+        assert "--db-url" in result.stdout
+        assert "--migrations-dir" in result.stdout
+        assert "--json" in result.stdout
+
+    def test_db_status_json_no_db_url_error(self) -> None:
+        result = runner.invoke(app, ["db", "status", "--json"])
+        assert result.exit_code != 0

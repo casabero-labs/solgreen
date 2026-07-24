@@ -374,3 +374,585 @@ class TestSyncResult:
         result.device_results = [dr1, dr2]
         result.error_count = dr1.authorized_errors + dr2.authorized_errors
         assert result.error_count == 3
+
+
+class TestSyncCliFlags:
+    def test_sync_help_shows_json_flag(self) -> None:
+        result = runner.invoke(app, ["solarman", "sync", "--help"])
+        assert result.exit_code == 0
+        assert "--json" in result.stdout
+
+    def test_sync_help_shows_dry_run_flag(self) -> None:
+        result = runner.invoke(app, ["solarman", "sync", "--help"])
+        assert result.exit_code == 0
+        assert "--dry-run" in result.stdout
+
+    def test_sync_help_shows_no_db_flag(self) -> None:
+        result = runner.invoke(app, ["solarman", "sync", "--help"])
+        assert result.exit_code == 0
+        assert "--no-db" in result.stdout
+
+    def test_dry_run_exit_0(self) -> None:
+        from unittest.mock import MagicMock, patch
+
+        mock_resolved = MagicMock()
+        mock_resolved.station_id = "ST001"
+        mock_resolved.masked_id = "ST**"
+
+        mock_settings = MagicMock()
+        with (
+            patch(
+                "solgreen.integrations.solarman.settings.build_settings_from_env",
+                return_value=mock_settings,
+            ),
+            patch(
+                "solgreen.integrations.solarman.station_resolver.resolve_station",
+                return_value=mock_resolved,
+            ),
+        ):
+            result = runner.invoke(
+                app,
+                ["solarman", "sync", "--dry-run", "--plant-id", "X", "--station-id", "ST001"],
+            )
+            assert result.exit_code == 0
+
+    def test_dry_run_shows_dry_run_message(self) -> None:
+        from unittest.mock import MagicMock, patch
+
+        mock_resolved = MagicMock()
+        mock_resolved.station_id = "ST001"
+        mock_resolved.masked_id = "ST**"
+
+        mock_settings = MagicMock()
+        with (
+            patch(
+                "solgreen.integrations.solarman.settings.build_settings_from_env",
+                return_value=mock_settings,
+            ),
+            patch(
+                "solgreen.integrations.solarman.station_resolver.resolve_station",
+                return_value=mock_resolved,
+            ),
+        ):
+            result = runner.invoke(
+                app,
+                ["solarman", "sync", "--dry-run", "--plant-id", "X", "--station-id", "ST001"],
+            )
+            assert "dry-run" in result.stdout.lower() or "dry_run" in result.stdout.lower()
+
+    def test_no_db_exit_1_when_station_resolved_but_sync_fails(self) -> None:
+        from unittest.mock import MagicMock, patch
+
+        mock_resolved = MagicMock()
+        mock_resolved.station_id = "ST001"
+        mock_resolved.masked_id = "ST**"
+
+        mock_settings = MagicMock()
+        with (
+            patch(
+                "solgreen.integrations.solarman.settings.build_settings_from_env",
+                return_value=mock_settings,
+            ),
+            patch(
+                "solgreen.integrations.solarman.station_resolver.resolve_station",
+                return_value=mock_resolved,
+            ),
+        ):
+            result = runner.invoke(
+                app, ["solarman", "sync", "--no-db", "--plant-id", "X", "--station-id", "ST001"]
+            )
+            assert result.exit_code == 1
+
+    def test_dry_run_does_not_acquire_lock(self) -> None:
+        from unittest.mock import MagicMock, patch
+
+        mock_resolved = MagicMock()
+        mock_resolved.station_id = "ST001"
+        mock_resolved.masked_id = "ST**"
+
+        mock_settings = MagicMock()
+        with (
+            patch(
+                "solgreen.integrations.solarman.settings.build_settings_from_env",
+                return_value=mock_settings,
+            ),
+            patch(
+                "solgreen.integrations.solarman.station_resolver.resolve_station",
+                return_value=mock_resolved,
+            ),
+            patch("solgreen.db.advisory_lock.acquire_sync_lock") as mock_lock,
+        ):
+            mock_lock.return_value = (MagicMock(), MagicMock())
+            runner.invoke(
+                app,
+                [
+                    "solarman",
+                    "sync",
+                    "--dry-run",
+                    "--plant-id",
+                    "X",
+                    "--station-id",
+                    "ST001",
+                    "--db-url",
+                    "postgresql://x",
+                ],
+            )
+            assert mock_lock.call_count == 0
+
+    def test_dry_run_does_not_open_db_connection(self) -> None:
+        from unittest.mock import MagicMock, patch
+
+        mock_resolved = MagicMock()
+        mock_resolved.station_id = "ST001"
+        mock_resolved.masked_id = "ST**"
+
+        mock_settings = MagicMock()
+        with (
+            patch(
+                "solgreen.integrations.solarman.settings.build_settings_from_env",
+                return_value=mock_settings,
+            ),
+            patch(
+                "solgreen.integrations.solarman.station_resolver.resolve_station",
+                return_value=mock_resolved,
+            ),
+            patch("solgreen.db.connection.get_connection") as mock_conn,
+        ):
+            mock_conn.return_value = MagicMock()
+            runner.invoke(
+                app,
+                [
+                    "solarman",
+                    "sync",
+                    "--dry-run",
+                    "--plant-id",
+                    "X",
+                    "--station-id",
+                    "ST001",
+                    "--db-url",
+                    "postgresql://x",
+                ],
+            )
+            assert mock_conn.call_count == 0
+
+    def test_client_close_called_on_resolution_failure(self) -> None:
+        from unittest.mock import MagicMock, patch
+
+        mock_settings = MagicMock()
+        mock_client = MagicMock()
+        from solgreen.integrations.solarman.station_resolver import (
+            StationResolutionError,
+        )
+
+        mock_client.close.side_effect = None
+
+        with (
+            patch(
+                "solgreen.integrations.solarman.settings.build_settings_from_env",
+                return_value=mock_settings,
+            ),
+            patch("solgreen.integrations.solarman.client.SolarmanClient", return_value=mock_client),
+            patch(
+                "solgreen.integrations.solarman.station_resolver.resolve_station",
+                side_effect=StationResolutionError("fail"),
+            ),
+        ):
+            result = runner.invoke(
+                app,
+                [
+                    "solarman",
+                    "sync",
+                    "--plant-id",
+                    "X",
+                    "--station-id",
+                    "ST001",
+                ],
+            )
+            assert result.exit_code == 1
+            mock_client.close.assert_called_once()
+
+    def test_sync_exception_release_success_exits_1(self) -> None:
+        from unittest.mock import MagicMock, patch
+
+        mock_resolved = MagicMock()
+        mock_resolved.station_id = "ST001"
+        mock_resolved.masked_id = "ST**"
+
+        mock_settings = MagicMock()
+        mock_lock = MagicMock()
+        mock_lock.release.return_value = MagicMock(value="released")
+
+        with (
+            patch(
+                "solgreen.integrations.solarman.settings.build_settings_from_env",
+                return_value=mock_settings,
+            ),
+            patch(
+                "solgreen.integrations.solarman.station_resolver.resolve_station",
+                return_value=mock_resolved,
+            ),
+            patch("solgreen.db.connection.get_connection") as mock_get_conn,
+        ):
+            mock_conn = MagicMock()
+            mock_get_conn.return_value = mock_conn
+            with (
+                patch(
+                    "solgreen.db.advisory_lock.acquire_sync_lock",
+                    return_value=(mock_lock, MagicMock(value="acquired")),
+                ),
+                patch(
+                    "solgreen.integrations.solarman.sync.sync_solarman_station",
+                    side_effect=RuntimeError("sync fail"),
+                ),
+            ):
+                result = runner.invoke(
+                    app,
+                    [
+                        "solarman",
+                        "sync",
+                        "--plant-id",
+                        "X",
+                        "--station-id",
+                        "ST001",
+                        "--db-url",
+                        "postgresql://x",
+                    ],
+                )
+                assert result.exit_code == 1
+
+    def test_sync_exception_release_error_exits_1(self) -> None:
+        from unittest.mock import MagicMock, patch
+
+        mock_resolved = MagicMock()
+        mock_resolved.station_id = "ST001"
+        mock_resolved.masked_id = "ST**"
+
+        mock_settings = MagicMock()
+        mock_lock = MagicMock()
+        from solgreen.db.advisory_lock import LockStatus
+
+        mock_lock.release.return_value = LockStatus.ERROR
+
+        with (
+            patch(
+                "solgreen.integrations.solarman.settings.build_settings_from_env",
+                return_value=mock_settings,
+            ),
+            patch(
+                "solgreen.integrations.solarman.station_resolver.resolve_station",
+                return_value=mock_resolved,
+            ),
+            patch("solgreen.db.connection.get_connection") as mock_get_conn,
+        ):
+            mock_conn = MagicMock()
+            mock_get_conn.return_value = mock_conn
+            with (
+                patch(
+                    "solgreen.db.advisory_lock.acquire_sync_lock",
+                    return_value=(mock_lock, LockStatus.ACQUIRED),
+                ),
+                patch(
+                    "solgreen.integrations.solarman.sync.sync_solarman_station",
+                    side_effect=RuntimeError("sync fail"),
+                ),
+            ):
+                result = runner.invoke(
+                    app,
+                    [
+                        "solarman",
+                        "sync",
+                        "--plant-id",
+                        "X",
+                        "--station-id",
+                        "ST001",
+                        "--db-url",
+                        "postgresql://x",
+                    ],
+                )
+                assert result.exit_code == 1
+
+    def test_success_release_error_exits_1(self) -> None:
+        from unittest.mock import MagicMock, patch
+
+        mock_resolved = MagicMock()
+        mock_resolved.station_id = "ST001"
+        mock_resolved.masked_id = "ST**"
+
+        mock_settings = MagicMock()
+        mock_lock = MagicMock()
+        from solgreen.db.advisory_lock import LockStatus
+
+        mock_lock.release.return_value = LockStatus.ERROR
+
+        mock_result = MagicMock()
+        mock_result.devices_queried = 1
+        mock_result.devices_succeeded = 1
+        mock_result.errors = []
+        mock_result.not_confirmed_count = 0
+        mock_result.snapshots_inserted = 0
+        mock_result.snapshots_skipped = 0
+        mock_result.normalized_count = 0
+        mock_result.not_found_count = 0
+        mock_result.error_count = 0
+
+        with (
+            patch(
+                "solgreen.integrations.solarman.settings.build_settings_from_env",
+                return_value=mock_settings,
+            ),
+            patch(
+                "solgreen.integrations.solarman.station_resolver.resolve_station",
+                return_value=mock_resolved,
+            ),
+            patch("solgreen.db.connection.get_connection") as mock_get_conn,
+        ):
+            mock_conn = MagicMock()
+            mock_get_conn.return_value = mock_conn
+            with (
+                patch(
+                    "solgreen.db.advisory_lock.acquire_sync_lock",
+                    return_value=(mock_lock, LockStatus.ACQUIRED),
+                ),
+                patch(
+                    "solgreen.integrations.solarman.sync.sync_solarman_station",
+                    return_value=mock_result,
+                ),
+            ):
+                result = runner.invoke(
+                    app,
+                    [
+                        "solarman",
+                        "sync",
+                        "--plant-id",
+                        "X",
+                        "--station-id",
+                        "ST001",
+                        "--db-url",
+                        "postgresql://x",
+                    ],
+                )
+                assert result.exit_code == 1
+
+    def test_json_format_no_secrets(self) -> None:
+        from unittest.mock import MagicMock, patch
+
+        mock_resolved = MagicMock()
+        mock_resolved.station_id = "ST001"
+        mock_resolved.masked_id = "ST**"
+
+        mock_settings = MagicMock()
+
+        mock_result = MagicMock()
+        mock_result.devices_queried = 0
+        mock_result.devices_succeeded = 0
+        mock_result.errors = ["list_devices: no stations"]
+        mock_result.not_confirmed_count = 0
+        mock_result.snapshots_inserted = 0
+        mock_result.snapshots_skipped = 0
+        mock_result.normalized_count = 0
+        mock_result.not_found_count = 0
+        mock_result.error_count = 1
+
+        with (
+            patch(
+                "solgreen.integrations.solarman.settings.build_settings_from_env",
+                return_value=mock_settings,
+            ),
+            patch(
+                "solgreen.integrations.solarman.station_resolver.resolve_station",
+                return_value=mock_resolved,
+            ),
+            patch(
+                "solgreen.integrations.solarman.sync.sync_solarman_station",
+                return_value=mock_result,
+            ),
+        ):
+            result = runner.invoke(
+                app,
+                [
+                    "solarman",
+                    "sync",
+                    "--dry-run",
+                    "--json",
+                    "--plant-id",
+                    "X",
+                    "--station-id",
+                    "ST001",
+                ],
+            )
+            output = result.stdout.lower()
+            assert "token" not in output
+            assert "password" not in output
+            assert "secret" not in output
+
+    def test_client_close_after_sync_not_during(self) -> None:
+        from unittest.mock import MagicMock, patch
+
+        mock_resolved = MagicMock()
+        mock_resolved.station_id = "ST001"
+        mock_resolved.masked_id = "ST**"
+
+        mock_settings = MagicMock()
+
+        mock_result = MagicMock()
+        mock_result.devices_queried = 1
+        mock_result.devices_succeeded = 1
+        mock_result.errors = []
+        mock_result.not_confirmed_count = 0
+        mock_result.snapshots_inserted = 5
+        mock_result.snapshots_skipped = 0
+        mock_result.normalized_count = 5
+        mock_result.not_found_count = 0
+        mock_result.error_count = 0
+
+        close_called_during_sync = []
+
+        def sync_side_effect(*args, **kwargs):
+            close_called_during_sync.append(mock_client.close.call_count)
+            return mock_result
+
+        mock_client = MagicMock()
+        mock_client.close.side_effect = None
+
+        with (
+            patch(
+                "solgreen.integrations.solarman.settings.build_settings_from_env",
+                return_value=mock_settings,
+            ),
+            patch(
+                "solgreen.integrations.solarman.client.SolarmanClient",
+                return_value=mock_client,
+            ),
+            patch(
+                "solgreen.integrations.solarman.station_resolver.resolve_station",
+                return_value=mock_resolved,
+            ),
+            patch(
+                "solgreen.integrations.solarman.sync.sync_solarman_station",
+                side_effect=sync_side_effect,
+            ),
+        ):
+            result = runner.invoke(
+                app,
+                [
+                    "solarman",
+                    "sync",
+                    "--plant-id",
+                    "X",
+                    "--station-id",
+                    "ST001",
+                ],
+            )
+            assert result.exit_code == 0
+            assert len(close_called_during_sync) > 0
+            assert all(c == 0 for c in close_called_during_sync)
+            mock_client.close.assert_called_once()
+
+    def test_sync_json_output_sanitizes_errors(self) -> None:
+        import json
+        from unittest.mock import MagicMock, patch
+
+        mock_resolved = MagicMock()
+        mock_resolved.station_id = "ST001"
+        mock_resolved.masked_id = "ST**"
+
+        mock_settings = MagicMock()
+
+        mock_result = MagicMock()
+        mock_result.devices_queried = 1
+        mock_result.devices_succeeded = 0
+        mock_result.errors = [
+            "Connection to postgresql://user:secret123@db.example.com:5432 failed",
+            "Authentication failed for token=abc123xyz",
+            "app_secret=mysecret123 user email=test@test.com station_id=ST001 device_sn=ABC123",
+        ]
+        mock_result.not_confirmed_count = 0
+        mock_result.snapshots_inserted = 0
+        mock_result.snapshots_skipped = 0
+        mock_result.normalized_count = 0
+        mock_result.not_found_count = 0
+        mock_result.error_count = 3
+
+        with (
+            patch(
+                "solgreen.integrations.solarman.settings.build_settings_from_env",
+                return_value=mock_settings,
+            ),
+            patch(
+                "solgreen.integrations.solarman.station_resolver.resolve_station",
+                return_value=mock_resolved,
+            ),
+            patch(
+                "solgreen.integrations.solarman.sync.sync_solarman_station",
+                return_value=mock_result,
+            ),
+        ):
+            result = runner.invoke(
+                app,
+                [
+                    "solarman",
+                    "sync",
+                    "--json",
+                    "--plant-id",
+                    "X",
+                    "--station-id",
+                    "ST001",
+                ],
+            )
+            assert result.exit_code == 1
+            output = json.loads(result.stdout)
+            assert output["ok"] is False
+            assert output["error_count"] == 3
+            assert isinstance(output["errors"], list)
+            assert len(output["errors"]) == 3
+
+            stdout_lower = result.stdout.lower()
+            assert "secret123" not in stdout_lower
+            assert "abc123xyz" not in stdout_lower
+            assert "mysecret123" not in stdout_lower
+            assert "test@test.com" not in stdout_lower
+            assert "st001" not in stdout_lower
+            assert "abc123" not in stdout_lower
+            assert "postgresql://user:secret123@" not in stdout_lower
+
+
+class TestSyncSkippedLocked:
+    def test_skipped_locked_exit_0(self) -> None:
+        from unittest.mock import MagicMock, patch
+
+        mock_resolved = MagicMock()
+        mock_resolved.station_id = "ST001"
+        mock_resolved.masked_id = "ST**"
+
+        with patch("solgreen.db.connection.get_connection") as mock_get_conn:
+            mock_connection = MagicMock()
+            mock_cursor = MagicMock()
+            mock_cursor.fetchone.return_value = (False,)
+            mock_connection.cursor.return_value.__enter__.return_value = mock_cursor
+            mock_connection.close = MagicMock()
+            mock_get_conn.return_value = mock_connection
+
+            with patch(
+                "solgreen.integrations.solarman.settings.build_settings_from_env"
+            ) as mock_settings:
+                mock_settings.return_value = MagicMock()
+
+                with patch(
+                    "solgreen.integrations.solarman.station_resolver.resolve_station",
+                    return_value=mock_resolved,
+                ):
+                    result = runner.invoke(
+                        app,
+                        [
+                            "solarman",
+                            "sync",
+                            "--plant-id",
+                            "X",
+                            "--station-id",
+                            "ST001",
+                            "--db-url",
+                            "postgresql://x",
+                        ],
+                    )
+
+                    assert result.exit_code == 0
