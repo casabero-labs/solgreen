@@ -14,7 +14,6 @@ from solgreen.energy.sign_profiles import (
     PowerSignProfileRegistry,
     ProfileStatus,
     SourceSystem,
-    build_production_sign_profile_registry,
 )
 
 _BASE_TS = datetime(2026, 7, 21, 12, 0, 0, tzinfo=UTC)
@@ -441,10 +440,6 @@ class TestPowerSignProfileRegistry:
         reg = PowerSignProfileRegistry()
         assert reg.count == 0
         assert reg.profiles == ()
-
-    def test_production_registry_empty(self) -> None:
-        reg = build_production_sign_profile_registry()
-        assert reg.count == 0
 
     def test_register_and_resolve_exact(self) -> None:
         reg = PowerSignProfileRegistry()

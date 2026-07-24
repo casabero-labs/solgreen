@@ -523,5 +523,4 @@ class PowerSignProfileRegistry:
         return candidates[0]
 
 
-def build_production_sign_profile_registry() -> PowerSignProfileRegistry:
-    return PowerSignProfileRegistry()
+# Moved to registry_seeds.py — see solgreen.energy.__init__.py re-export.

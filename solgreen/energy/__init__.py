@@ -18,7 +18,10 @@ from solgreen.energy.normalization import (
     NormalizationStatus,
     normalize_power_value,
 )
-from solgreen.energy.registry_seeds import build_telemetry_sign_profile_registry
+from solgreen.energy.registry_seeds import (
+    build_production_sign_profile_registry,
+    build_telemetry_sign_profile_registry,
+)
 from solgreen.energy.sign_profiles import (
     AuthorityClass,
     CanonicalPowerField,
@@ -28,7 +31,6 @@ from solgreen.energy.sign_profiles import (
     PowerSignProfileRegistry,
     ProfileStatus,
     SourceSystem,
-    build_production_sign_profile_registry,
     is_power_field_source_compatible,
     is_timezone_aware,
     validity_intervals_overlap,

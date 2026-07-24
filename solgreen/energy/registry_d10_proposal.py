@@ -48,10 +48,9 @@ TEMPORAL PROVENANCE
 - Existing registry (registry_seeds.py):
     valid_from = 2026-07-01
     evidence_refs = "owner_decision_2026_07_21"
-- Real evidence collected: 2026-07-23.
-- The 2026-07-01 valid_from predates both the owner decision (2026-07-21)
-  and the real evidence (2026-07-23). The existing profiles are
-  LEGACY_PRE_REAL_EVIDENCE and are NOT silently extended.
+- Real evidence was collected and is documented in private evidence files.
+- The 2026-07-01 valid_from predates the owner decision. The existing
+  profiles are LEGACY_PRE_EVIDENCE and are NOT silently extended.
 - This file does NOT define a default `effective_from`. The cutover
   timestamp is supplied explicitly to `build_updated_profiles(effective_from=...)`.
   See ADR-009 §"Temporal semantics".
@@ -86,8 +85,8 @@ OPERATIONAL STATUS
 - This file is NOT loaded by `build_telemetry_sign_profile_registry()`.
 - This file is NOT exported from `solgreen.energy.__init__`.
 - Promoting the new profiles requires, in order:
-    1. Owner-supplied `effective_from` (timezone-aware datetime AFTER the
-       real evidence date 2026-07-23) passed to `build_updated_profiles()`.
+    1. Owner-supplied `effective_from` (timezone-aware datetime approved
+       by the operator) passed to `build_updated_profiles()`.
     2. Edit to `registry_seeds.py` adding `valid_to=effective_from` to
        each existing profile that the new profile replaces.
     3. Edit to `registry_seeds.py` registering new profiles from the
@@ -130,8 +129,8 @@ PROFILE_VERSION = "u2_1b.1-d1.0"
 # be supplied explicitly via `build_updated_profiles(effective_from=...)`.
 # See the rationale in ADR-009 §"Temporal semantics".
 #
-# Evidence reference for the new profiles. References the real private
-# evidence collected on 2026-07-23 (owner decision pending).
+# Evidence reference for the new profiles. References the private
+# evidence collected during the owner-approved evidence window.
 EVIDENCE_REF = "owner_decision_post_2026_07_23_u2_1b.1"
 
 # Legacy evidence reference used by the existing registry_seeds.py profiles.

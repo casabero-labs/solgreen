@@ -2,10 +2,11 @@
 
 ## Status
 
-**Proposed** — implements asymmetric evidence in `PowerSignProfile` and
-re-anchors normalization to the per-direction gate. Status will move to
-**Accepted** when the operator authorizes the commit that adopts this
-contract and the integration into `registry_seeds.py`.
+**Accepted** — implements asymmetric evidence in `PowerSignProfile` and
+re-anchors normalization to the per-direction gate. The contractual
+decision was accepted. Runtime activation is pending: `effective_from`
+must be supplied by the operator or deployment configuration at cutover
+time. The code contains no reference to the private evidence window.
 
 ## Context
 
@@ -195,8 +196,7 @@ def build_updated_profiles(
 `UPDATED_PROFILES` are **templates** (no `valid_from` field). The builder
 is the only construction path. Promotion requires the operator to:
 
-1. Choose a real cutover timestamp `T` strictly after the real evidence
-   window (currently 2026-07-23 02:34–16:25 UTC).
+1. Choose a real cutover timestamp `T` approved by the operator.
 2. Call `build_updated_profiles(effective_from=T)`.
 3. Register the returned profiles in the production registry after
    closing the existing ones with `valid_to=T`.

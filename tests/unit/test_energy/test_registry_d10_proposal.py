@@ -32,6 +32,7 @@ from solgreen.energy.registry_d10_proposal import (
     count_supporting_signals_not_promotable,
     is_promotable,
 )
+from solgreen.energy.registry_seeds import build_production_sign_profile_registry
 from solgreen.energy.sign_profiles import (
     AuthorityClass,
     CanonicalPowerField,
@@ -43,11 +44,10 @@ from solgreen.energy.sign_profiles import (
     SourceSystem,
 )
 
-# Real evidence was collected on 2026-07-23 between 02:34 and 16:25 UTC.
-# Any cutover timestamp used in tests MUST be strictly after the
-# latest evidence sample (the test values below are at 17:00 UTC the
-# same day, conservatively past the evidence window).
-_TEST_EFFECTIVE_FROM = datetime(2026, 7, 23, 17, 0, 0, tzinfo=UTC)
+# Synthetic timezone-aware cutover timestamp for testing.
+# Must be strictly after any real evidence window; this value is
+# chosen as a convenient test fixture with no private meaning.
+_TEST_EFFECTIVE_FROM = datetime(2026, 7, 25, 0, 0, 0, tzinfo=UTC)
 
 # ── Schema validation: the 4 UPDATED_PROFILES ─────────────────────────────────
 
@@ -179,13 +179,11 @@ class TestTemporalProvenance:
         with pytest.raises(ValueError, match="timezone-aware"):
             build_updated_profiles(effective_from=naive)
 
-    def test_builder_profiles_after_real_evidence_window(self) -> None:
-        """The builder does not invent dates; it accepts any tz-aware
-        datetime, but operators MUST pick one strictly after the real
-        evidence window (2026-07-23 16:25 UTC)."""
-        # Operator-supplied timestamps strictly after 2026-07-23 16:25 UTC
-        # are accepted; we test that 17:00 UTC works.
-        ts = datetime(2026, 7, 23, 17, 0, 0, tzinfo=UTC)
+    def test_builder_accepts_operator_supplied_timestamp(self) -> None:
+        """The builder accepts any timezone-aware datetime supplied by the
+        operator.  The operator is responsible for choosing a timestamp
+        that is appropriate for the deployment."""
+        ts = datetime(2026, 7, 25, 0, 0, 0, tzinfo=UTC)
         profiles = build_updated_profiles(effective_from=ts)
         assert profiles["battery_b_p1"].valid_from == ts
 
@@ -750,7 +748,293 @@ class TestProposalIsolation:
             )
 
     def test_production_registry_is_empty(self) -> None:
-        from solgreen.energy.sign_profiles import build_production_sign_profile_registry
+        with pytest.raises(TypeError):
+            build_production_sign_profile_registry()
 
-        registry = build_production_sign_profile_registry()
-        assert registry.count == 0
+
+class TestProductionRegistryIntegration:
+    """Integration tests for build_production_sign_profile_registry.
+
+    Verifies the combined behavior of legacy profiles (closed at cutover)
+    and D1.0 profiles (opened at cutover) in a single registry.
+    """
+
+    _CUTOVER = datetime(2026, 7, 25, 0, 0, 0, tzinfo=UTC)
+    _BEFORE = datetime(2026, 7, 24, 23, 59, 59, tzinfo=UTC)
+    _AFTER = datetime(2026, 7, 25, 0, 0, 1, tzinfo=UTC)
+
+    def test_requires_effective_from(self) -> None:
+        with pytest.raises(TypeError):
+            build_production_sign_profile_registry()
+
+    def test_rejects_none(self) -> None:
+        with pytest.raises((ValueError, ValidationError)):
+            build_production_sign_profile_registry(effective_from=None)  # type: ignore[arg-type]
+
+    def test_rejects_naive_datetime(self) -> None:
+        naive = datetime(2026, 7, 25, 0, 0, 0)
+        with pytest.raises((ValueError, ValidationError)):
+            build_production_sign_profile_registry(effective_from=naive)
+
+    def test_no_private_timestamp_hardcoded(self) -> None:
+        import inspect
+
+        from solgreen.energy import registry_seeds
+
+        src = inspect.getsource(registry_seeds)
+        assert "EFFECTIVE_FROM_RAW" not in src
+        assert "EFFECTIVE_FROM" not in src
+
+    def test_legacy_builder_unchanged(self) -> None:
+        from solgreen.energy.registry_seeds import build_telemetry_sign_profile_registry
+
+        reg = build_telemetry_sign_profile_registry()
+        assert reg.count == 4
+        for p in reg.profiles:
+            assert p.valid_to is None
+
+    def test_repeated_calls_are_deterministic(self) -> None:
+        reg_a = build_production_sign_profile_registry(effective_from=self._CUTOVER)
+        reg_b = build_production_sign_profile_registry(effective_from=self._CUTOVER)
+        assert reg_a.count == reg_b.count == 8
+        profiles_a = {p.measurement_point: p for p in reg_a.profiles}
+        profiles_b = {p.measurement_point: p for p in reg_b.profiles}
+        assert profiles_a.keys() == profiles_b.keys()
+        for key in profiles_a:
+            pa = profiles_a[key]
+            pb = profiles_b[key]
+            assert pa.profile_version == pb.profile_version
+            assert pa.status == pb.status
+            assert pa.valid_from == pb.valid_from
+
+    def test_repeated_calls_return_independent_registries(self) -> None:
+        reg_a = build_production_sign_profile_registry(effective_from=self._CUTOVER)
+        reg_b = build_production_sign_profile_registry(effective_from=self._CUTOVER)
+        assert reg_a is not reg_b
+
+    def test_eight_profiles_in_registry(self) -> None:
+        reg = build_production_sign_profile_registry(effective_from=self._CUTOVER)
+        assert reg.count == 8
+        versions = {p.profile_version for p in reg.profiles}
+        assert "u2_1b.1-telemetry" in versions
+        assert "u2_1b.1-d1.0" in versions
+
+    def test_no_gap_between_legacy_and_new(self) -> None:
+        reg = build_production_sign_profile_registry(effective_from=self._CUTOVER)
+        by_field: dict = {p.canonical_field: p for p in reg.profiles}
+        for _field, profile in by_field.items():
+            assert profile.valid_from == self._CUTOVER
+
+    def test_no_overlap_between_legacy_and_new(self) -> None:
+        reg = build_production_sign_profile_registry(effective_from=self._CUTOVER)
+        for p in reg.profiles:
+            if p.profile_version == "u2_1b.1-telemetry":
+                assert p.valid_to == self._CUTOVER
+            elif p.profile_version == "u2_1b.1-d1.0":
+                assert p.valid_to is None
+                assert p.valid_from == self._CUTOVER
+
+    def test_old_valid_to_equals_new_valid_from(self) -> None:
+        reg = build_production_sign_profile_registry(effective_from=self._CUTOVER)
+        for p in reg.profiles:
+            if p.profile_version == "u2_1b.1-telemetry":
+                assert p.valid_to == self._CUTOVER
+            elif p.profile_version == "u2_1b.1-d1.0":
+                assert p.valid_from == self._CUTOVER
+
+    def test_before_cutover_resolves_legacy(self) -> None:
+        from solgreen.energy.registry_seeds import build_telemetry_sign_profile_registry
+
+        reg = build_telemetry_sign_profile_registry()
+        resolved = reg.resolve(
+            "SOLGREEN",
+            CanonicalPowerField.TELEMETRY_GRID,
+            SourceSystem.INVERTER_TELEMETRY,
+            self._BEFORE,
+        )
+        assert resolved.profile_version == "u2_1b.1-telemetry"
+        assert resolved.status == ProfileStatus.CONFIRMED
+
+    def test_at_cutover_resolves_d10(self) -> None:
+        reg = build_production_sign_profile_registry(effective_from=self._CUTOVER)
+        resolved = reg.resolve(
+            "SOLGREEN",
+            CanonicalPowerField.TELEMETRY_GRID,
+            SourceSystem.INVERTER_TELEMETRY,
+            self._CUTOVER,
+        )
+        assert resolved.profile_version == "u2_1b.1-d1.0"
+
+    def test_after_cutover_resolves_d10(self) -> None:
+        reg = build_production_sign_profile_registry(effective_from=self._CUTOVER)
+        resolved = reg.resolve(
+            "SOLGREEN",
+            CanonicalPowerField.TELEMETRY_GRID,
+            SourceSystem.INVERTER_TELEMETRY,
+            self._AFTER,
+        )
+        assert resolved.profile_version == "u2_1b.1-d1.0"
+
+    def test_legacy_grid_positive_normalizes_as_export(self) -> None:
+        from solgreen.energy.registry_seeds import build_telemetry_sign_profile_registry
+
+        reg = build_telemetry_sign_profile_registry()
+        result = normalize_power_value(
+            plant_id="SOLGREEN",
+            raw_power_w=500.0,
+            canonical_field=CanonicalPowerField.TELEMETRY_GRID,
+            source_system=SourceSystem.INVERTER_TELEMETRY,
+            timestamp=self._BEFORE,
+            registry=reg,
+        )
+        assert result.status == NormalizationStatus.NORMALIZED
+        assert result.grid_export_w == 500.0
+
+    def test_legacy_grid_negative_normalizes_as_import(self) -> None:
+        from solgreen.energy.registry_seeds import build_telemetry_sign_profile_registry
+
+        reg = build_telemetry_sign_profile_registry()
+        result = normalize_power_value(
+            plant_id="SOLGREEN",
+            raw_power_w=-500.0,
+            canonical_field=CanonicalPowerField.TELEMETRY_GRID,
+            source_system=SourceSystem.INVERTER_TELEMETRY,
+            timestamp=self._BEFORE,
+            registry=reg,
+        )
+        assert result.status == NormalizationStatus.NORMALIZED
+        assert result.grid_import_w == 500.0
+
+    def test_d10_grid_positive_returns_profile_not_confirmed(self) -> None:
+        reg = build_production_sign_profile_registry(effective_from=self._CUTOVER)
+        result = normalize_power_value(
+            plant_id="SOLGREEN",
+            raw_power_w=500.0,
+            canonical_field=CanonicalPowerField.TELEMETRY_GRID,
+            source_system=SourceSystem.INVERTER_TELEMETRY,
+            timestamp=self._AFTER,
+            registry=reg,
+        )
+        assert result.status == NormalizationStatus.PROFILE_NOT_CONFIRMED
+
+    def test_d10_grid_negative_normalizes_as_import(self) -> None:
+        reg = build_production_sign_profile_registry(effective_from=self._CUTOVER)
+        result = normalize_power_value(
+            plant_id="SOLGREEN",
+            raw_power_w=-500.0,
+            canonical_field=CanonicalPowerField.TELEMETRY_GRID,
+            source_system=SourceSystem.INVERTER_TELEMETRY,
+            timestamp=self._AFTER,
+            registry=reg,
+        )
+        assert result.status == NormalizationStatus.NORMALIZED
+        assert result.grid_import_w == 500.0
+
+    def test_battery_positive_normalizes_as_discharge(self) -> None:
+        reg = build_production_sign_profile_registry(effective_from=self._CUTOVER)
+        result = normalize_power_value(
+            plant_id="SOLGREEN",
+            raw_power_w=300.0,
+            canonical_field=CanonicalPowerField.TELEMETRY_BATTERY,
+            source_system=SourceSystem.INVERTER_TELEMETRY,
+            timestamp=self._AFTER,
+            registry=reg,
+        )
+        assert result.status == NormalizationStatus.NORMALIZED
+        assert result.battery_discharge_w == 300.0
+
+    def test_battery_negative_normalizes_as_charge(self) -> None:
+        reg = build_production_sign_profile_registry(effective_from=self._CUTOVER)
+        result = normalize_power_value(
+            plant_id="SOLGREEN",
+            raw_power_w=-300.0,
+            canonical_field=CanonicalPowerField.TELEMETRY_BATTERY,
+            source_system=SourceSystem.INVERTER_TELEMETRY,
+            timestamp=self._AFTER,
+            registry=reg,
+        )
+        assert result.status == NormalizationStatus.NORMALIZED
+        assert result.battery_charge_w == 300.0
+
+    def test_pv_positive_normalizes(self) -> None:
+        reg = build_production_sign_profile_registry(effective_from=self._CUTOVER)
+        result = normalize_power_value(
+            plant_id="SOLGREEN",
+            raw_power_w=1000.0,
+            canonical_field=CanonicalPowerField.TELEMETRY_PV,
+            source_system=SourceSystem.INVERTER_TELEMETRY,
+            timestamp=self._AFTER,
+            registry=reg,
+        )
+        assert result.status == NormalizationStatus.NORMALIZED
+        assert result.pv_generation_w == 1000.0
+
+    def test_pv_negative_returns_profile_not_confirmed(self) -> None:
+        reg = build_production_sign_profile_registry(effective_from=self._CUTOVER)
+        result = normalize_power_value(
+            plant_id="SOLGREEN",
+            raw_power_w=-100.0,
+            canonical_field=CanonicalPowerField.TELEMETRY_PV,
+            source_system=SourceSystem.INVERTER_TELEMETRY,
+            timestamp=self._AFTER,
+            registry=reg,
+        )
+        assert result.status == NormalizationStatus.PROFILE_NOT_CONFIRMED
+
+    def test_load_positive_normalizes(self) -> None:
+        reg = build_production_sign_profile_registry(effective_from=self._CUTOVER)
+        result = normalize_power_value(
+            plant_id="SOLGREEN",
+            raw_power_w=800.0,
+            canonical_field=CanonicalPowerField.FLOW_CONSUMO,
+            source_system=SourceSystem.SOLARMAN_PLANT_FLOW,
+            timestamp=self._AFTER,
+            registry=reg,
+        )
+        assert result.status == NormalizationStatus.NORMALIZED
+        assert result.load_consumption_w == 800.0
+
+    def test_load_negative_returns_profile_not_confirmed(self) -> None:
+        reg = build_production_sign_profile_registry(effective_from=self._CUTOVER)
+        result = normalize_power_value(
+            plant_id="SOLGREEN",
+            raw_power_w=-50.0,
+            canonical_field=CanonicalPowerField.FLOW_CONSUMO,
+            source_system=SourceSystem.SOLARMAN_PLANT_FLOW,
+            timestamp=self._AFTER,
+            registry=reg,
+        )
+        assert result.status == NormalizationStatus.PROFILE_NOT_CONFIRMED
+
+    def test_supporting_signals_not_in_production_registry(self) -> None:
+        reg = build_production_sign_profile_registry(effective_from=self._CUTOVER)
+        mp_set = {p.measurement_point for p in reg.profiles}
+        assert "telemetry:inverter:b_c1" not in mp_set
+        assert "telemetry:inverter:dp1" not in mp_set
+        assert "telemetry:inverter:dp2" not in mp_set
+
+    def test_deferred_signals_not_in_production_registry(self) -> None:
+        reg = build_production_sign_profile_registry(effective_from=self._CUTOVER)
+        mp_set = {p.measurement_point for p in reg.profiles}
+        for mp in mp_set:
+            assert "uap1" not in mp
+            assert "uap2" not in mp
+
+    def test_registering_same_profile_twice_in_one_registry_raises(self) -> None:
+        from solgreen.energy.registry_seeds import _build_legacy_telemetry_profiles
+
+        reg = PowerSignProfileRegistry()
+        profile = _build_legacy_telemetry_profiles(valid_to=None)[0]
+        reg.register(profile)
+        with pytest.raises(ValueError, match="Duplicate"):
+            reg.register(profile)
+
+    def test_builder_twice_does_not_raise(self) -> None:
+        build_production_sign_profile_registry(effective_from=self._CUTOVER)
+        build_production_sign_profile_registry(effective_from=self._CUTOVER)
+
+    def test_import_from_solgreen_energy(self) -> None:
+        from solgreen.energy import build_production_sign_profile_registry
+
+        reg = build_production_sign_profile_registry(effective_from=self._CUTOVER)
+        assert reg.count == 8
