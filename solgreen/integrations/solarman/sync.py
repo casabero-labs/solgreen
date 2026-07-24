@@ -44,6 +44,7 @@ class SyncResult:
     station_id: str
     plant_id: str
     devices_queried: int
+    devices_succeeded: int = 0
     snapshots_inserted: int = 0
     snapshots_skipped: int = 0
     normalized_count: int = 0
@@ -55,7 +56,7 @@ class SyncResult:
 
     @property
     def success(self) -> bool:
-        return self.snapshots_inserted > 0 or self.snapshots_skipped > 0
+        return self.devices_succeeded > 0
 
     @property
     def total_normalized(self) -> int:
@@ -116,6 +117,8 @@ def sync_solarman_station(
             conn=conn,
         )
         result.device_results.append(device_result)
+        if device_result.error is None:
+            result.devices_succeeded += 1
         if device_result.snapshot_inserted:
             result.snapshots_inserted += 1
         elif device_result.snapshot_skipped:
@@ -297,12 +300,11 @@ def _persist_snapshot(
     if row is None:
         snapshot_id = _resolve_existing_snapshot_id(conn, snapshot)
         if snapshot_id is None:
-            return {
-                "inserted": False,
-                "skipped": True,
-                "normalized_inserted": 0,
-                "normalized_skipped": 0,
-            }
+            conn.rollback()
+            raise RuntimeError(
+                f"Snapshot conflict but not found for device_sn={snapshot.device_sn}, "
+                f"collection_time={snapshot.collection_time}"
+            )
     else:
         snapshot_id = row[0]
 

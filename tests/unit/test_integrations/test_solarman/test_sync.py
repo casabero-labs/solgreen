@@ -305,6 +305,13 @@ class TestPersistenceMocks:
         sid = _resolve_existing_snapshot_id(conn, mock_snapshot)
         assert sid is None
 
+    def test_conflict_without_row_raises_and_rollbacks(self, mock_snapshot, norm_entries) -> None:
+        conn = self._build_conn([None, None])
+        with pytest.raises(RuntimeError, match="conflict but not found"):
+            _persist_snapshot(conn, mock_snapshot, norm_entries)
+        conn.rollback.assert_called_once()
+        conn.commit.assert_not_called()
+
 
 class TestCLI:
     def test_all_devices_fail_exit_1(self) -> None:
@@ -330,18 +337,34 @@ class TestCLI:
 
 
 class TestSyncResult:
-    def test_success_when_inserted(self) -> None:
+    def test_success_when_devices_succeeded(self) -> None:
         result = SyncResult(station_id="S1", plant_id="P1", devices_queried=1)
-        result.snapshots_inserted = 1
+        result.devices_succeeded = 1
         assert result.success is True
 
-    def test_success_when_skipped(self) -> None:
+    def test_success_when_no_db_but_device_ok(self) -> None:
         result = SyncResult(station_id="S1", plant_id="P1", devices_queried=1)
-        result.snapshots_skipped = 1
+        result.devices_succeeded = 1
+        assert result.snapshots_inserted == 0
+        assert result.snapshots_skipped == 0
         assert result.success is True
 
     def test_not_success_when_nothing(self) -> None:
         result = SyncResult(station_id="S1", plant_id="P1", devices_queried=1)
+        assert result.devices_succeeded == 0
+        assert result.success is False
+
+    def test_partial_success_still_true(self) -> None:
+        result = SyncResult(station_id="S1", plant_id="P1", devices_queried=2)
+        result.devices_succeeded = 1
+        result.errors.append("device_2: failed")
+        assert result.success is True
+
+    def test_all_failed_success_false(self) -> None:
+        result = SyncResult(station_id="S1", plant_id="P1", devices_queried=2)
+        result.devices_succeeded = 0
+        result.errors.append("A: fail")
+        result.errors.append("B: fail")
         assert result.success is False
 
     def test_error_count_includes_single_count(self) -> None:

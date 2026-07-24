@@ -682,7 +682,7 @@ def solarman_sync(
 
     if result.devices_queried == 0:
         raise typer.Exit(code=1)
-    if not result.success and not result.snapshots_skipped:
+    if result.devices_succeeded == 0:
         raise typer.Exit(code=1)
 
 
