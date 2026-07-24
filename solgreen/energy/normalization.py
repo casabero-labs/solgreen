@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from solgreen.energy.sign_profiles import (
     AuthorityClass,
     CanonicalPowerField,
+    DirectionEvidenceStatus,
     PowerDirection,
     PowerSignProfile,
     PowerSignProfileRegistry,
@@ -47,6 +48,15 @@ class DirectionalPowerResult(BaseModel):
     pv_generation_w: float | None = None
     load_consumption_w: float | None = None
     warnings: tuple[str, ...] = Field(default=())
+    # True iff the raw value was within `profile.zero_deadband_w` and was
+    # therefore treated as zero (NO_FLOW) regardless of direction.
+    # When True:
+    #   - `raw_power_w` is the original observation (preserved).
+    #   - Both applicable directional magnitudes are forced to 0.0.
+    #   - The magnitude-conservation invariant is bypassed because the
+    #     deadband consumes the magnitude.
+    # See ADR-009 §"Raw observation vs. normalized output".
+    within_zero_deadband: bool = False
 
     @pydantic.model_validator(mode="after")
     def _validate_normalized_invariants(self) -> DirectionalPowerResult:
@@ -59,8 +69,6 @@ class DirectionalPowerResult(BaseModel):
                 raise ValueError("normalized result raw_power_w must be finite.")
             if self.profile_version is None:
                 raise ValueError("normalized result must have profile_version.")
-            if self.profile_status is not ProfileStatus.CONFIRMED:
-                raise ValueError("normalized result must have profile_status=confirmed.")
             for field_name in (
                 "grid_import_w",
                 "grid_export_w",
@@ -75,8 +83,17 @@ class DirectionalPowerResult(BaseModel):
                         raise ValueError(f"{field_name} must be finite when populated.")
                     if val < 0:
                         raise ValueError(f"{field_name} must be non-negative when populated.")
-            self._validate_zero_explicit_magnitudes()
-            self._validate_magnitude_conservation()
+            if self.within_zero_deadband:
+                # Deadband path: raw preserved, magnitudes forced to 0.0,
+                # direction-based checks (profile_status, magnitude
+                # conservation) are bypassed.
+                self._validate_deadband_magnitudes_zero()
+            else:
+                # Direction-based normalization path.
+                if self.profile_status is not ProfileStatus.CONFIRMED:
+                    raise ValueError("normalized result must have profile_status=confirmed.")
+                self._validate_zero_explicit_magnitudes()
+                self._validate_magnitude_conservation()
         else:
             self._validate_non_normalized_status_metadata()
             for field_name in (
@@ -93,7 +110,25 @@ class DirectionalPowerResult(BaseModel):
                         f"Non-normalized result must not populate directional fields. "
                         f"{field_name} is set."
                     )
+            if self.within_zero_deadband:
+                raise ValueError("within_zero_deadband is only meaningful for NORMALIZED results.")
         return self
+
+    def _validate_deadband_magnitudes_zero(self) -> None:
+        """Within deadband: every directional magnitude must be 0.0 or None."""
+        for field_name in (
+            "grid_import_w",
+            "grid_export_w",
+            "battery_charge_w",
+            "battery_discharge_w",
+            "pv_generation_w",
+            "load_consumption_w",
+        ):
+            val = getattr(self, field_name)
+            if val is not None and val != 0.0:
+                raise ValueError(
+                    f"within_zero_deadband requires {field_name}=0.0 or None, got {val}."
+                )
 
     def _validate_authority_for_current_fields(self) -> None:
         if self.authority_class is not AuthorityClass.OPERATIONAL:
@@ -317,13 +352,6 @@ class DirectionalPowerResult(BaseModel):
         elif status is NormalizationStatus.PROFILE_NOT_CONFIRMED:
             if self.profile_version is None:
                 raise ValueError("profile_not_confirmed result must have profile_version set.")
-            if self.profile_status not in (
-                ProfileStatus.PROVISIONAL,
-                ProfileStatus.UNKNOWN,
-            ):
-                raise ValueError(
-                    "profile_not_confirmed result must have profile_status=provisional or unknown."
-                )
             if self.raw_power_w is None:
                 raise ValueError("profile_not_confirmed result must have raw_power_w set.")
 
@@ -383,17 +411,6 @@ def normalize_power_value(
             authority_class=AuthorityClass.OPERATIONAL,
             raw_power_w=raw_power_w,
             status=NormalizationStatus.PROFILE_NOT_FOUND,
-        )
-
-    if profile.status is not ProfileStatus.CONFIRMED:
-        return DirectionalPowerResult(
-            canonical_field=canonical_field,
-            source_system=source_system,
-            authority_class=profile.authority_class,
-            raw_power_w=raw_power_w,
-            status=NormalizationStatus.PROFILE_NOT_CONFIRMED,
-            profile_version=profile.profile_version,
-            profile_status=profile.status,
         )
 
     return _apply_profile(
@@ -478,29 +495,69 @@ def _normalize_grid(
     profile: PowerSignProfile,
     raw_power_w: float,
 ) -> DirectionalPowerResult:
-    if raw_power_w == 0.0:
+    """Normalize a grid raw power value using per-direction evidence.
+
+    Behavior (per ADR-009):
+        - |raw_power_w| <= zero_deadband_w   -> NORMALIZED with both
+          directional magnitudes set to 0.0 (NO_FLOW).
+        - raw_power_w > 0  -> consult `positive_means` and
+          `positive_evidence_status`. If either is UNKNOWN or not CONFIRMED,
+          return PROFILE_NOT_CONFIRMED. Otherwise, normalize as
+          GRID_IMPORT or GRID_EXPORT per `positive_means`.
+        - raw_power_w < 0  -> same logic for the negative direction.
+    """
+    if abs(raw_power_w) <= profile.zero_deadband_w:
+        # Within deadband: raw_power_w is PRESERVED (original observation
+        # is never mutated by the normalizer). Both directional magnitudes
+        # are forced to 0.0 (NO_FLOW). The within_zero_deadband flag
+        # tells the validator to skip the magnitude-conservation check.
+        # A warning records the original raw value so the consumer can
+        # distinguish deadband-consumed zero from a literal zero.
         return DirectionalPowerResult(
             canonical_field=canonical_field,
             source_system=source_system,
             authority_class=profile.authority_class,
-            raw_power_w=0.0,
+            raw_power_w=raw_power_w,
             status=NormalizationStatus.NORMALIZED,
             profile_version=profile.profile_version,
             profile_status=profile.status,
             grid_import_w=0.0,
             grid_export_w=0.0,
+            within_zero_deadband=True,
+            warnings=(
+                f"within zero deadband (+/-{profile.zero_deadband_w} W); treated as zero (NO_FLOW)",
+            ),
         )
 
-    positive_dir = profile.positive_means if raw_power_w > 0 else profile.negative_means
+    if raw_power_w > 0:
+        direction = profile.positive_means
+        direction_status = profile.positive_evidence_status
+    else:
+        direction = profile.negative_means
+        direction_status = profile.negative_evidence_status
+
+    if (
+        direction is PowerDirection.UNKNOWN
+        or direction_status is not DirectionEvidenceStatus.CONFIRMED
+    ):
+        return DirectionalPowerResult(
+            canonical_field=canonical_field,
+            source_system=source_system,
+            authority_class=profile.authority_class,
+            raw_power_w=raw_power_w,
+            status=NormalizationStatus.PROFILE_NOT_CONFIRMED,
+            profile_version=profile.profile_version,
+            profile_status=profile.status,
+        )
 
     magnitude = abs(raw_power_w)
 
     grid_import: float | None = None
     grid_export: float | None = None
 
-    if positive_dir is PowerDirection.GRID_IMPORT:
+    if direction is PowerDirection.GRID_IMPORT:
         grid_import = magnitude
-    elif positive_dir is PowerDirection.GRID_EXPORT:
+    elif direction is PowerDirection.GRID_EXPORT:
         grid_export = magnitude
 
     return DirectionalPowerResult(
@@ -523,29 +580,56 @@ def _normalize_battery(
     profile: PowerSignProfile,
     raw_power_w: float,
 ) -> DirectionalPowerResult:
-    if raw_power_w == 0.0:
+    """Normalize a battery raw power value using per-direction evidence.
+
+    Behavior (per ADR-009): same deadband + per-direction gating as grid.
+    """
+    if abs(raw_power_w) <= profile.zero_deadband_w:
         return DirectionalPowerResult(
             canonical_field=canonical_field,
             source_system=source_system,
             authority_class=profile.authority_class,
-            raw_power_w=0.0,
+            raw_power_w=raw_power_w,
             status=NormalizationStatus.NORMALIZED,
             profile_version=profile.profile_version,
             profile_status=profile.status,
             battery_charge_w=0.0,
             battery_discharge_w=0.0,
+            within_zero_deadband=True,
+            warnings=(
+                f"within zero deadband (+/-{profile.zero_deadband_w} W); treated as zero (NO_FLOW)",
+            ),
         )
 
-    positive_dir = profile.positive_means if raw_power_w > 0 else profile.negative_means
+    if raw_power_w > 0:
+        direction = profile.positive_means
+        direction_status = profile.positive_evidence_status
+    else:
+        direction = profile.negative_means
+        direction_status = profile.negative_evidence_status
+
+    if (
+        direction is PowerDirection.UNKNOWN
+        or direction_status is not DirectionEvidenceStatus.CONFIRMED
+    ):
+        return DirectionalPowerResult(
+            canonical_field=canonical_field,
+            source_system=source_system,
+            authority_class=profile.authority_class,
+            raw_power_w=raw_power_w,
+            status=NormalizationStatus.PROFILE_NOT_CONFIRMED,
+            profile_version=profile.profile_version,
+            profile_status=profile.status,
+        )
 
     magnitude = abs(raw_power_w)
 
     battery_charge: float | None = None
     battery_discharge: float | None = None
 
-    if positive_dir is PowerDirection.BATTERY_CHARGE:
+    if direction is PowerDirection.BATTERY_CHARGE:
         battery_charge = magnitude
-    elif positive_dir is PowerDirection.BATTERY_DISCHARGE:
+    elif direction is PowerDirection.BATTERY_DISCHARGE:
         battery_discharge = magnitude
 
     return DirectionalPowerResult(
@@ -569,20 +653,73 @@ def _normalize_unsigned(
     raw_power_w: float,
     positive_field: str,
 ) -> DirectionalPowerResult:
-    if raw_power_w < 0:
+    """Normalize an unsigned (PV / LOAD) raw power value using per-direction evidence.
+
+    Behavior (per ADR-009):
+        - |raw_power_w| <= zero_deadband_w  -> NORMALIZED with the positive
+          field set to 0.0 (NO_FLOW).
+        - raw_power_w > 0  -> consult `positive_means` and
+          `positive_evidence_status`. If either is UNKNOWN or not CONFIRMED,
+          return PROFILE_NOT_CONFIRMED. Otherwise, populate `positive_field`.
+        - raw_power_w < 0  -> consult `negative_means` and
+          `negative_evidence_status`. If either is UNKNOWN or not CONFIRMED,
+          return PROFILE_NOT_CONFIRMED.
+
+    NOTE: per ADR-009, negative raw values on unsigned fields now produce
+    PROFILE_NOT_CONFIRMED (not INVALID_UNSIGNED_NEGATIVE). The
+    `negative_means` for unsigned fields is documented as UNKNOWN or NO_FLOW
+    by the schema, so this preserves the previous behavior for legacy
+    profiles while making the gate explicit and per-direction.
+    """
+    if abs(raw_power_w) <= profile.zero_deadband_w:
+        kwargs: dict[str, float | None] = {
+            "grid_import_w": None,
+            "grid_export_w": None,
+            "battery_charge_w": None,
+            "battery_discharge_w": None,
+            "pv_generation_w": None,
+            "load_consumption_w": None,
+        }
+        kwargs[positive_field] = 0.0
         return DirectionalPowerResult(
             canonical_field=canonical_field,
             source_system=source_system,
             authority_class=profile.authority_class,
             raw_power_w=raw_power_w,
-            status=NormalizationStatus.INVALID_UNSIGNED_NEGATIVE,
+            status=NormalizationStatus.NORMALIZED,
+            profile_version=profile.profile_version,
+            profile_status=profile.status,
+            within_zero_deadband=True,
+            warnings=(
+                f"within zero deadband (+/-{profile.zero_deadband_w} W); treated as zero (NO_FLOW)",
+            ),
+            **kwargs,
+        )
+
+    if raw_power_w > 0:
+        direction = profile.positive_means
+        direction_status = profile.positive_evidence_status
+    else:
+        direction = profile.negative_means
+        direction_status = profile.negative_evidence_status
+
+    if (
+        direction is PowerDirection.UNKNOWN
+        or direction_status is not DirectionEvidenceStatus.CONFIRMED
+    ):
+        return DirectionalPowerResult(
+            canonical_field=canonical_field,
+            source_system=source_system,
+            authority_class=profile.authority_class,
+            raw_power_w=raw_power_w,
+            status=NormalizationStatus.PROFILE_NOT_CONFIRMED,
             profile_version=profile.profile_version,
             profile_status=profile.status,
         )
 
-    magnitude = raw_power_w
+    magnitude = raw_power_w if raw_power_w > 0 else abs(raw_power_w)
 
-    kwargs: dict[str, float | None] = {
+    kwargs = {
         "grid_import_w": None,
         "grid_export_w": None,
         "battery_charge_w": None,

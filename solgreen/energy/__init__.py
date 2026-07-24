@@ -22,6 +22,7 @@ from solgreen.energy.registry_seeds import build_telemetry_sign_profile_registry
 from solgreen.energy.sign_profiles import (
     AuthorityClass,
     CanonicalPowerField,
+    DirectionEvidenceStatus,
     PowerDirection,
     PowerSignProfile,
     PowerSignProfileRegistry,
@@ -37,6 +38,7 @@ __all__ = [
     "SIGN_ZERO_DEADBAND_W",
     "AuthorityClass",
     "CanonicalPowerField",
+    "DirectionEvidenceStatus",
     "DirectionalPowerResult",
     "NormalizationStatus",
     "PowerDirection",

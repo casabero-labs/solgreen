@@ -411,7 +411,7 @@ class TestUnsignedNormalization:
         assert result.status is NormalizationStatus.NORMALIZED
         assert result.load_consumption_w == 1200.0
 
-    def test_pv_negative_rejected(self) -> None:
+    def test_pv_negative_returns_not_confirmed(self) -> None:
         reg = PowerSignProfileRegistry()
         reg.register(_pv_profile())
         result = _normalize(
@@ -420,10 +420,12 @@ class TestUnsignedNormalization:
             -100.0,
             reg,
         )
-        assert result.status is NormalizationStatus.INVALID_UNSIGNED_NEGATIVE
+        assert result.status is NormalizationStatus.PROFILE_NOT_CONFIRMED
         assert result.pv_generation_w is None
+        assert result.profile_version is not None
+        assert result.profile_status is ProfileStatus.CONFIRMED
 
-    def test_load_negative_rejected(self) -> None:
+    def test_load_negative_returns_not_confirmed(self) -> None:
         reg = PowerSignProfileRegistry()
         reg.register(_load_profile())
         result = _normalize(
@@ -432,8 +434,10 @@ class TestUnsignedNormalization:
             -50.0,
             reg,
         )
-        assert result.status is NormalizationStatus.INVALID_UNSIGNED_NEGATIVE
+        assert result.status is NormalizationStatus.PROFILE_NOT_CONFIRMED
         assert result.load_consumption_w is None
+        assert result.profile_version is not None
+        assert result.profile_status is ProfileStatus.CONFIRMED
 
     def test_pv_zero_preserves_zero(self) -> None:
         reg = PowerSignProfileRegistry()

@@ -35,6 +35,29 @@ class ProfileStatus(StrEnum):
     UNKNOWN = "unknown"
 
 
+class DirectionEvidenceStatus(StrEnum):
+    """Per-direction evidence status.
+
+    Each PowerSignProfile carries evidence status independently for its
+    `positive_means` and `negative_means` directions. The status indicates
+    the strength of the anchor that justifies normalizing that direction.
+
+    Semantics:
+    - NOT_ASSESSED: no anchor collected for this direction.
+    - PROVISIONAL: directional anchor present but not yet owner-approved
+      as confirmed; normalization is deferred.
+    - CONFIRMED: owner-anchored evidence supports normalizing this
+      direction; the corresponding magnitude is populated.
+    - CONTRADICTED: owner-anchored evidence contradicts the assigned
+      meaning; normalization is refused for this direction.
+    """
+
+    NOT_ASSESSED = "not_assessed"
+    PROVISIONAL = "provisional"
+    CONFIRMED = "confirmed"
+    CONTRADICTED = "contradicted"
+
+
 class PowerDirection(StrEnum):
     GRID_IMPORT = "grid_import"
     GRID_EXPORT = "grid_export"
@@ -134,6 +157,26 @@ def is_timezone_aware(value: datetime) -> bool:
     return value.tzinfo is not None and value.utcoffset() is not None
 
 
+def _derive_evidence_status(
+    direction: PowerDirection, profile_status: ProfileStatus
+) -> DirectionEvidenceStatus:
+    """Derive per-direction evidence status from direction and profile status.
+
+    Backward-compat rule (see ADR-009):
+        - direction = UNKNOWN           -> NOT_ASSESSED (no meaning, no evidence)
+        - profile_status = CONFIRMED    -> CONFIRMED
+        - profile_status = PROVISIONAL  -> PROVISIONAL
+        - profile_status = UNKNOWN      -> NOT_ASSESSED
+    """
+    if direction is PowerDirection.UNKNOWN:
+        return DirectionEvidenceStatus.NOT_ASSESSED
+    if profile_status is ProfileStatus.CONFIRMED:
+        return DirectionEvidenceStatus.CONFIRMED
+    if profile_status is ProfileStatus.PROVISIONAL:
+        return DirectionEvidenceStatus.PROVISIONAL
+    return DirectionEvidenceStatus.NOT_ASSESSED
+
+
 def _field_domain(field: CanonicalPowerField) -> str:
     if field in _GRID_FIELDS:
         return "grid"
@@ -177,6 +220,8 @@ class PowerSignProfile(BaseModel):
     valid_from: datetime
     valid_to: datetime | None = None
     notes: str | None = None
+    positive_evidence_status: DirectionEvidenceStatus | None = None
+    negative_evidence_status: DirectionEvidenceStatus | None = None
 
     @pydantic.model_validator(mode="after")
     def _validate_datetime_aware(self) -> PowerSignProfile:
@@ -243,16 +288,87 @@ class PowerSignProfile(BaseModel):
         return self
 
     @pydantic.model_validator(mode="after")
-    def _validate_confirmed_directions_not_unknown(self) -> PowerSignProfile:
-        if self.status is ProfileStatus.CONFIRMED:
-            if self.positive_means is PowerDirection.UNKNOWN:
-                raise ValueError("A confirmed profile must have a known positive_means.")
-            if (
-                self.negative_means is PowerDirection.UNKNOWN
-                and self.canonical_field not in _PV_FIELDS
-                and self.canonical_field not in _LOAD_FIELDS
+    def _derive_per_direction_evidence_status(self) -> PowerSignProfile:
+        """Derive per-direction evidence status from `status` and direction.
+
+        Backward-compat rule (see ADR-009): when a profile does not specify
+        `positive_evidence_status` / `negative_evidence_status` explicitly,
+        the values are derived as follows:
+            - direction = UNKNOWN           -> NOT_ASSESSED
+            - status = CONFIRMED            -> CONFIRMED
+            - status = PROVISIONAL          -> PROVISIONAL
+            - status = UNKNOWN              -> NOT_ASSESSED
+
+        This preserves the previous behavior for existing profiles in
+        `registry_seeds.py` and existing test fixtures.
+
+        Implementation note: we use `object.__setattr__` to mutate `self`
+        in-place because the model is `frozen=True` and Pydantic requires
+        `mode="after"` validators to return `self`. The freeze has not yet
+        been applied at this stage of construction.
+        """
+        if self.positive_evidence_status is None:
+            object.__setattr__(
+                self,
+                "positive_evidence_status",
+                _derive_evidence_status(self.positive_means, self.status),
+            )
+        if self.negative_evidence_status is None:
+            object.__setattr__(
+                self,
+                "negative_evidence_status",
+                _derive_evidence_status(self.negative_means, self.status),
+            )
+        return self
+
+    @pydantic.model_validator(mode="after")
+    def _validate_direction_evidence_combination(self) -> PowerSignProfile:
+        """Validate per-direction evidence status against the direction meaning.
+
+        Rules (per ADR-009):
+            - direction = UNKNOWN    -> evidence_status in {NOT_ASSESSED, PROVISIONAL}
+            - direction != UNKNOWN    -> evidence_status in {PROVISIONAL, CONFIRMED, CONTRADICTED}
+            - direction != UNKNOWN and evidence_status = NOT_ASSESSED -> rejected
+              (a known meaning implies some evidence must exist).
+        """
+        pos_status = self.positive_evidence_status
+        assert pos_status is not None  # ensured by _derive_per_direction_evidence_status
+        if self.positive_means is PowerDirection.UNKNOWN:
+            if pos_status not in (
+                DirectionEvidenceStatus.NOT_ASSESSED,
+                DirectionEvidenceStatus.PROVISIONAL,
             ):
-                raise ValueError("A confirmed profile must have a known negative_means.")
+                raise ValueError(
+                    f"positive_means=UNKNOWN requires positive_evidence_status "
+                    f"in {{NOT_ASSESSED, PROVISIONAL}}, got {pos_status.value}."
+                )
+        else:
+            if pos_status is DirectionEvidenceStatus.NOT_ASSESSED:
+                raise ValueError(
+                    f"positive_means={self.positive_means.value} requires "
+                    f"positive_evidence_status not NOT_ASSESSED "
+                    f"(a known meaning implies some evidence must exist)."
+                )
+
+        neg_status = self.negative_evidence_status
+        assert neg_status is not None  # ensured by _derive_per_direction_evidence_status
+        if self.negative_means is PowerDirection.UNKNOWN:
+            if neg_status not in (
+                DirectionEvidenceStatus.NOT_ASSESSED,
+                DirectionEvidenceStatus.PROVISIONAL,
+            ):
+                raise ValueError(
+                    f"negative_means=UNKNOWN requires negative_evidence_status "
+                    f"in {{NOT_ASSESSED, PROVISIONAL}}, got {neg_status.value}."
+                )
+        else:
+            if neg_status is DirectionEvidenceStatus.NOT_ASSESSED:
+                raise ValueError(
+                    f"negative_means={self.negative_means.value} requires "
+                    f"negative_evidence_status not NOT_ASSESSED "
+                    f"(a known meaning implies some evidence must exist)."
+                )
+
         return self
 
     @pydantic.model_validator(mode="after")
@@ -262,6 +378,19 @@ class PowerSignProfile(BaseModel):
                 raise ValueError("An unknown profile must use positive_means=unknown.")
             if self.negative_means is not PowerDirection.UNKNOWN:
                 raise ValueError("An unknown profile must use negative_means=unknown.")
+            # A profile marked UNKNOWN administratively cannot simultaneously
+            # claim any per-direction evidence as CONFIRMED — that would
+            # contradict the administrative state. Explicit override of a
+            # per-direction field is allowed only when profile.status reflects
+            # that the corresponding direction is owner-anchored.
+            if self.positive_evidence_status is DirectionEvidenceStatus.CONFIRMED:
+                raise ValueError(
+                    "ProfileStatus.UNKNOWN cannot have positive_evidence_status=CONFIRMED."
+                )
+            if self.negative_evidence_status is DirectionEvidenceStatus.CONFIRMED:
+                raise ValueError(
+                    "ProfileStatus.UNKNOWN cannot have negative_evidence_status=CONFIRMED."
+                )
         return self
 
     @pydantic.model_validator(mode="after")

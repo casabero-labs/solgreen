@@ -8,6 +8,7 @@ from pydantic import ValidationError
 from solgreen.energy.sign_profiles import (
     AuthorityClass,
     CanonicalPowerField,
+    DirectionEvidenceStatus,
     PowerDirection,
     PowerSignProfile,
     PowerSignProfileRegistry,
@@ -205,6 +206,14 @@ class TestPowerSignProfile:
             )
 
     def test_confirmed_with_unknown_direction_rejected(self) -> None:
+        """ADR-009: UNKNOWN direction + CONFIRMED evidence_status is rejected.
+
+        Previously this test asserted the old contract (CONFIRMED profile
+        status with positive_means=UNKNOWN was rejected). The new per-
+        direction evidence model allows CONFIRMED + UNKNOWN when the
+        UNKNOWN direction carries NOT_ASSESSED or PROVISIONAL evidence.
+        This test now pins the explicit cross-product rejection.
+        """
         with pytest.raises(ValidationError):
             PowerSignProfile(
                 plant_id="casabero",
@@ -215,6 +224,8 @@ class TestPowerSignProfile:
                 unit="W",
                 positive_means=PowerDirection.UNKNOWN,
                 negative_means=PowerDirection.GRID_EXPORT,
+                positive_evidence_status=DirectionEvidenceStatus.CONFIRMED,
+                negative_evidence_status=DirectionEvidenceStatus.CONFIRMED,
                 status=ProfileStatus.CONFIRMED,
                 evidence_refs=("obs:grid-night-01",),
                 profile_version="1.0.0",

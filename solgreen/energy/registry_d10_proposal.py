@@ -1,112 +1,191 @@
 """
-PROPOSAL: D1.0 SOLARMAN Sign Profile Registry — U2.1b.1 Update
+D1.0 SOLARMAN Sign Profile Registry — U2.1b.1 Proposal (Redesign).
 
-Owner-approved sign conventions for SOLARMAN D1.0 inverter telemetry.
+PRINCIPLES
+==========
 
-IMPORTANT: This file is a PROPOSAL. It does NOT modify the existing
-registry_seeds.py. Owner approval is required before committing changes.
+1. PowerSignProfile represents exclusively power in watts.
+   The schema `unit: Literal["W"]` is NOT extended.
+   No "A" (amperes), per-phase, or per-string variants are promoted
+   as PowerSignProfile.
 
-What this proposal does:
-    1. Proposes 9 sign-profile entries for D1.0 signals
-    2. Documents 4 existing profiles as already correctly registered
-    3. Documents 11 deferred signals requiring separate approval
-    4. Proposes per-phase canonical fields for future registry extension
+2. One authoritative signal per (canonical_field, source_system) tuple.
+   Promotion replaces old profiles using semi-open intervals:
+       old.valid_to  = effective_from
+       new.valid_from = effective_from
+   New and old profiles never coexist at any timestamp.
 
-Signal mapping (D1.0 → canonical field):
-    B_P1     → TELEMETRY_BATTERY   ✓ (power, W)
-    B_C1     → TELEMETRY_BATTERY   ✓ (current, A — same direction convention as B_P1)
-    T_A_P_O_G → TELEMETRY_GRID    ✓ (import only in this proposal)
-    DP1/DP2  → TELEMETRY_PV        ✓
-    C_P_PVT  → TELEMETRY_PV        ✓
-    E_Puse_t1 → FLOW_CONSUMO      ✓
-    C_P_L1   → FLOW_CONSUMO        ✓ (per-phase, same canonical as total)
-    C_P_L2   → FLOW_CONSUMO        ✓ (per-phase, same canonical as total)
+3. Per-direction evidence status (ADR-009).
+   `profile.status` is administrative only. Authorization for normalizing
+   a direction is held by `positive_evidence_status` and
+   `negative_evidence_status`. This lets a single profile express
+   "import confirmed, export deferred" without losing either direction.
+   The grid profile is the canonical example: profile.status=CONFIRMED
+   with positive_evidence_status=NOT_ASSESSED and
+   negative_evidence_status=CONFIRMED.
 
-Proposed new canonical fields (not yet in enum — require separate approval):
-    TELEMETRY_GRID_L1  = "telemetry_grid_power_l1_w"
-    TELEMETRY_GRID_L2  = "telemetry_grid_power_l2_w"
-    TELEMETRY_PV_STRING1 = "telemetry_pv_power_string1_w"
-    TELEMETRY_PV_STRING2 = "telemetry_pv_power_string2_w"
+ARCHITECTURE
+============
 
-Registry changes required (in order):
-    Step 1: Extend CanonicalPowerField enum with per-phase and per-string fields
-    Step 2: Update normalization.py to recognize new canonical fields
-    Step 3: Update registry_seeds.py evidence_refs to U2.1b.1
-    Step 4: Add per-phase grid profiles (UAP1/UAP2) after enum extension
+- UPDATED_PROFILES: 4 PowerSignProfile-compatible entries (W only).
+    battery_b_p1       — BATTERY_DISCHARGE / BATTERY_CHARGE   — CONFIRMED
+    grid_t_a_p_o_g     — UNKNOWN         / GRID_IMPORT       — CONFIRMED
+                         (per-direction evidence: NOT_ASSESSED / CONFIRMED)
+    pv_c_p_pvt         — PV_GENERATION   / UNKNOWN           — CONFIRMED
+    load_e_puse_t1     — LOAD_CONSUMPTION/ UNKNOWN           — CONFIRMED
 
-Only T_A_P_O_G represents productive grid import in this proposal.
-UAP1 and UAP2 are deferred as a family until UAP2 ambiguity is resolved.
+- SUPPORTING_SIGNALS: 7 raw signals documented but NOT registered.
+    B_C1 (A, current), DP1/DP2 (W, per-string PV), C_P_L1/C_P_L2 (W,
+    per-phase load), UAP1/UAP2 (W, per-phase grid). All carry
+    production_registry_allowed=False.
 
-Deferred signals (NOT registered — require separate approval):
-    T_A_P_O_G positive (export)      — 0 samples, no anchor
-    UAP1 positive                    — 0 samples
-    UAP1 negative                    — 4 samples, confirmed_one_direction (ap=4),
-                                      but deferred as family until UAP2 resolved
-    UAP2 positive                   — 2 samples, ambiguous
-    UAP2 negative                    — 1 sample, strong_candidate, DEFER
-    DP1/DP2/C_P_PVT negative        — 0 samples, NOT_ASSESSED
-    C_P_L1/C_P_L2/E_Puse_t1 negative — 0 samples, NOT_DECLARED
-    All grid-export directions (T_A_P_O_G+, UAP1+, UAP2+) — DEFERRED
+- DEFERRED_SIGNALS: 11 directions without owner-anchored evidence.
+    Grid export, UAP1±, UAP2±, PV negative, load negative.
+
+TEMPORAL PROVENANCE
+===================
+
+- Existing registry (registry_seeds.py):
+    valid_from = 2026-07-01
+    evidence_refs = "owner_decision_2026_07_21"
+- Real evidence collected: 2026-07-23.
+- The 2026-07-01 valid_from predates both the owner decision (2026-07-21)
+  and the real evidence (2026-07-23). The existing profiles are
+  LEGACY_PRE_REAL_EVIDENCE and are NOT silently extended.
+- This file does NOT define a default `effective_from`. The cutover
+  timestamp is supplied explicitly to `build_updated_profiles(effective_from=...)`.
+  See ADR-009 §"Temporal semantics".
+- Promotion geometry uses semi-open intervals; see PRINCIPLES #2.
+
+CONSUMER AUDIT (PROFILE_NOT_CONFIRMED)
+======================================
+
+As of this proposal, `normalize_power_value()` has NO production consumer
+in solgreen/. Search results across `solgreen/**/*.py` show:
+- normalize_power_value is referenced ONLY in tests.
+- PROFILE_NOT_CONFIRMED is referenced ONLY in tests.
+- DirectionalPowerResult is referenced ONLY in tests.
+
+Implications for the new grid profile (per-direction evidence):
+- No code converts PROFILE_NOT_CONFIRMED to zero.
+- No code adds PROFILE_NOT_CONFIRMED to import.
+- No code treats PROFILE_NOT_CONFIRMED as confirmed export.
+- No code raises unhandled exception (status is a closed enum value,
+  DirectionalPowerResult is built without errors for this status).
+
+Behavioral guarantee (per ADR-009):
+- raw grid < 0   (outside deadband)  -> NORMALIZED as GRID_IMPORT.
+- raw grid > 0   (outside deadband)  -> PROFILE_NOT_CONFIRMED.
+- |raw grid|    <= zero_deadband_w   -> NORMALIZED with both
+                                         directional magnitudes = 0.0
+                                         (NO_FLOW).
+
+OPERATIONAL STATUS
+==================
+
+- This file is NOT loaded by `build_telemetry_sign_profile_registry()`.
+- This file is NOT exported from `solgreen.energy.__init__`.
+- Promoting the new profiles requires, in order:
+    1. Owner-supplied `effective_from` (timezone-aware datetime AFTER the
+       real evidence date 2026-07-23) passed to `build_updated_profiles()`.
+    2. Edit to `registry_seeds.py` adding `valid_to=effective_from` to
+       each existing profile that the new profile replaces.
+    3. Edit to `registry_seeds.py` registering new profiles from the
+       dict returned by `build_updated_profiles()` (in any order; register
+       order does not affect resolution).
+    4. CI must pass (ruff, mypy, pytest).
+    5. Rollout follows ADR-008 principles.
+
+ROLLBACK
+========
+
+If promotion causes an operational regression:
+    1. Remove the new profiles from `registry_seeds.py`.
+    2. Remove `valid_to` from the closed profiles (set back to None).
+    3. The registry reverts to the LEGACY_PRE_REAL_EVIDENCE behavior.
 """
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime
 
 from solgreen.energy.sign_profiles import (
     AuthorityClass,
     CanonicalPowerField,
+    DirectionEvidenceStatus,
     PowerDirection,
+    PowerSignProfile,
     ProfileStatus,
     SourceSystem,
+    is_timezone_aware,
 )
 
-PROFILE_VERSION = "u2_1b1_d1_0"
-VALID_FROM = datetime(2026, 7, 23, tzinfo=UTC)
-EVIDENCE_REF = "owner_decision_2026_07_23_u2_1b1"
+PROFILE_VERSION = "u2_1b.1-d1.0"
 
 
-# ── Existing registry status ────────────────────────────────────────────────────
+# ── Provenance constants ───────────────────────────────────────────────────────
 #
-# The following 4 profiles already exist in registry_seeds.py with status CONFIRMED.
-# This proposal updates their evidence_refs and notes to reference U2.1b.1.
+# Owner approval of the cutover timestamp is REQUIRED before promotion.
+# No default effective_from is provided at module level; the timestamp must
+# be supplied explicitly via `build_updated_profiles(effective_from=...)`.
+# See the rationale in ADR-009 §"Temporal semantics".
 #
-# Name                 Canonical field              Status
-# ─────────────────────────────────────────────────────────────────────────────
-# Battery B_P1         TELEMETRY_BATTERY            CONFIRMED ✓
-# Grid T_A_P_O_G       TELEMETRY_GRID               CONFIRMED ✓ (import only)
-# PV DP1/DP2/C_P_PVT  TELEMETRY_PV                 CONFIRMED ✓
-# Load E_Puse_t1       FLOW_CONSUMO                 CONFIRMED ✓
-#
-# All 4 require evidence_ref update from "owner_decision_2026_07_21"
-# to EVIDENCE_REF = "owner_decision_2026_07_23_u2_1b1"
-#
-# ─────────────────────────────────────────────────────────────────────────────
+# Evidence reference for the new profiles. References the real private
+# evidence collected on 2026-07-23 (owner decision pending).
+EVIDENCE_REF = "owner_decision_post_2026_07_23_u2_1b.1"
+
+# Legacy evidence reference used by the existing registry_seeds.py profiles.
+# Kept here ONLY for traceability comparison; not used by new profiles.
+LEGACY_EVIDENCE_REF = "owner_decision_2026_07_21"
 
 
-# ── Per-phase grid profiles (DEFERRED — requires enum extension) ───────────────
+# ── Authoritative sign profiles (4 templates) ────────────────────────────────
 #
-# UAP1 and UAP2 are deferred as a family until UAP2 ambiguity is resolved.
-# T_A_P_O_G remains the approved total-grid import signal in this proposal.
+# Each entry below is a TEMPLATE: it is missing `valid_from` because that
+# timestamp must be supplied explicitly by the operator via
+# `build_updated_profiles(effective_from=...)`. No default effective_from is
+# provided at module level — see ADR-009 §"Temporal semantics" for the
+# rationale (the operator must choose a real cutover timestamp; the
+# proposal never invents one).
 #
-# UAP1 (L1 phase grid active power):
-#   canonical_field = TELEMETRY_GRID_L1  (proposed)
-#   negative = L1 grid import (n=4, ap=4) — CONFIRMED_ONE_DIRECTION_PRIVATE
-#   positive = DEFERRED — no ST_PG1='Selling energy' anchor confirmed
-#
-# UAP2 (L2 phase grid active power):
-#   canonical_field = TELEMETRY_GRID_L2  (proposed)
-#   negative = strong_candidate (n=1, ap=1) — DEFER
-#   positive = DEFERRED_AMBIGUOUS (n=2, no anchor)
+# Promotion path: build_updated_profiles() -> registry.register().
 
 
-# ── Proposed sign-profile entries ─────────────────────────────────────────────
-#
-# 9 entries. These are PROPOSALS — not yet in registry_seeds.py.
-# All are CONFIRMED or CONFIRMED_BIDIRECTIONAL based on U2.1b.1 evidence.
+def build_updated_profiles(*, effective_from: datetime) -> dict[str, PowerSignProfile]:
+    """Build the four authoritative PowerSignProfile instances for promotion.
+
+    `effective_from` is REQUIRED. It must be a timezone-aware datetime
+    (UTC offset set). Naive datetimes and `None` are rejected; the
+    function never invents a cutover timestamp.
+
+    Returns a dict mapping profile key -> PowerSignProfile with
+    `valid_from=effective_from`. The four keys are:
+
+        - "battery_b_p1"
+        - "grid_t_a_p_o_g"
+        - "pv_c_p_pvt"
+        - "load_e_puse_t1"
+    """
+    if effective_from is None:
+        raise ValueError(
+            "effective_from is required and must not be None. "
+            "No default cutover timestamp is provided at module level; "
+            "the operator must supply a real, owner-approved datetime."
+        )
+    if not is_timezone_aware(effective_from):
+        raise ValueError(
+            f"effective_from must be timezone-aware "
+            f"(tzinfo and utcoffset both set), got naive: {effective_from!r}"
+        )
+    result: dict[str, PowerSignProfile] = {}
+    for key, template in UPDATED_PROFILES.items():
+        data = dict(template)
+        data["valid_from"] = effective_from
+        result[key] = PowerSignProfile(**data)
+    return result
 
 
-UPDATED_PROFILES = {
+UPDATED_PROFILES: dict[str, dict[str, object]] = {
     "battery_b_p1": {
         "plant_id": "SOLGREEN",
         "canonical_field": CanonicalPowerField.TELEMETRY_BATTERY,
@@ -118,39 +197,18 @@ UPDATED_PROFILES = {
         "negative_means": PowerDirection.BATTERY_CHARGE,
         "zero_means": PowerDirection.NO_FLOW,
         "zero_deadband_w": 5.0,
+        "positive_evidence_status": DirectionEvidenceStatus.CONFIRMED,
+        "negative_evidence_status": DirectionEvidenceStatus.CONFIRMED,
         "status": ProfileStatus.CONFIRMED,
         "evidence_refs": (EVIDENCE_REF,),
         "profile_version": PROFILE_VERSION,
-        "valid_from": VALID_FROM,
         "notes": (
-            "B_P1: confirmed_bidirectional. "
-            "positive = battery discharging (B_P1>0 + B_ST1='Discharging', n=2 samples). "
-            "negative = battery charging (B_P1<0 + B_ST1='Charging', n=2 samples). "
-            "Owner-approved U2.1b.1. Evidence: 4 real snapshots, Jul 2026."
-        ),
-    },
-    "battery_b_c1": {
-        "plant_id": "SOLGREEN",
-        "canonical_field": CanonicalPowerField.TELEMETRY_BATTERY,
-        "source_system": SourceSystem.INVERTER_TELEMETRY,
-        "authority_class": AuthorityClass.OPERATIONAL,
-        "measurement_point": "telemetry:inverter:b_c1",
-        "unit": "A",
-        "positive_means": PowerDirection.BATTERY_DISCHARGE,
-        "negative_means": PowerDirection.BATTERY_CHARGE,
-        "zero_means": PowerDirection.NO_FLOW,
-        "zero_deadband_w": 0.5,
-        "status": ProfileStatus.CONFIRMED,
-        "evidence_refs": (EVIDENCE_REF,),
-        "profile_version": PROFILE_VERSION,
-        "valid_from": VALID_FROM,
-        "notes": (
-            "B_C1: confirmed_bidirectional. "
-            "Battery current (A). Shares direction convention with B_P1 (W), "
-            "but is a different physical measurement — not interchangeable with power. "
-            "positive = battery discharging (B_C1>0 aligned with B_P1>0 + B_ST1='Discharging'). "
-            "negative = battery charging (B_C1<0 aligned with B_P1<0 + B_ST1='Charging'). "
-            "Owner-approved U2.1b.1."
+            "B_P1: bidirectional battery power. "
+            "positive = battery discharging (B_P1>0 + B_ST1='Discharging'). "
+            "negative = battery charging (B_P1<0 + B_ST1='Charging'). "
+            "Both directions owner-anchored. "
+            "Replaces legacy_pre_real_evidence profile "
+            "(valid_from=2026-07-01, evidence_refs=owner_decision_2026_07_21)."
         ),
     },
     "grid_t_a_p_o_g": {
@@ -164,62 +222,28 @@ UPDATED_PROFILES = {
         "negative_means": PowerDirection.GRID_IMPORT,
         "zero_means": PowerDirection.NO_FLOW,
         "zero_deadband_w": 5.0,
+        # ADR-009: per-direction evidence status is the actual gate for
+        # normalization. profile.status=CONFIRMED is administrative only.
+        # Positive direction (export) carries NOT_ASSESSED; the corresponding
+        # raw values return PROFILE_NOT_CONFIRMED until an export event is
+        # anchored by ST_PG1='Selling energy'.
+        # Negative direction (import) is owner-anchored by
+        # ST_PG1='Purchasing energy' (n=4, ap=4) and CONFIRMED per direction.
+        "positive_evidence_status": DirectionEvidenceStatus.NOT_ASSESSED,
+        "negative_evidence_status": DirectionEvidenceStatus.CONFIRMED,
         "status": ProfileStatus.CONFIRMED,
         "evidence_refs": (EVIDENCE_REF,),
         "profile_version": PROFILE_VERSION,
-        "valid_from": VALID_FROM,
         "notes": (
-            "T_A_P_O_G: confirmed_one_direction (negative/import only). "
-            "Only T_A_P_O_G represents productive grid import in this proposal. "
-            "negative = grid importing from Afinia (T_A_P_O_G<0 + ST_PG1='Purchasing energy', n=4, ap=4). "
-            "positive = DEFERRED — no ST_PG1='Selling energy' anchor confirmed. "
-            "Grid export requires natural authorized event. "
-            "Owner-approved U2.1b.1. Evidence: 4 real snapshots, Jul 2026."
-        ),
-    },
-    "pv_dp1": {
-        "plant_id": "SOLGREEN",
-        "canonical_field": CanonicalPowerField.TELEMETRY_PV,
-        "source_system": SourceSystem.INVERTER_TELEMETRY,
-        "authority_class": AuthorityClass.OPERATIONAL,
-        "measurement_point": "telemetry:inverter:dp1",
-        "unit": "W",
-        "positive_means": PowerDirection.PV_GENERATION,
-        "negative_means": PowerDirection.UNKNOWN,
-        "zero_means": PowerDirection.NO_FLOW,
-        "zero_deadband_w": 5.0,
-        "status": ProfileStatus.CONFIRMED,
-        "evidence_refs": (EVIDENCE_REF,),
-        "profile_version": PROFILE_VERSION,
-        "valid_from": VALID_FROM,
-        "notes": (
-            "DP1: confirmed_one_direction (positive only). "
-            "PV string 1 DC power. "
-            "positive = PV generation (DP1>0 daytime, n=2 samples). "
-            "zero = no generation (nighttime — not evidence of reverse). "
-            "negative = NOT_ASSESSED. "
-            "Owner-approved U2.1b.1. Evidence: 2 daytime + 2 nighttime snapshots."
-        ),
-    },
-    "pv_dp2": {
-        "plant_id": "SOLGREEN",
-        "canonical_field": CanonicalPowerField.TELEMETRY_PV,
-        "source_system": SourceSystem.INVERTER_TELEMETRY,
-        "authority_class": AuthorityClass.OPERATIONAL,
-        "measurement_point": "telemetry:inverter:dp2",
-        "unit": "W",
-        "positive_means": PowerDirection.PV_GENERATION,
-        "negative_means": PowerDirection.UNKNOWN,
-        "zero_means": PowerDirection.NO_FLOW,
-        "zero_deadband_w": 5.0,
-        "status": ProfileStatus.CONFIRMED,
-        "evidence_refs": (EVIDENCE_REF,),
-        "profile_version": PROFILE_VERSION,
-        "valid_from": VALID_FROM,
-        "notes": (
-            "DP2: confirmed_one_direction (positive only). "
-            "PV string 2 DC power. Same behavior as DP1. "
-            "Owner-approved U2.1b.1. Evidence: 2 daytime + 2 nighttime snapshots."
+            "T_A_P_O_G: per-direction evidence (ADR-009). "
+            "negative_evidence_status=CONFIRMED: import anchored by "
+            "ST_PG1='Purchasing energy' (n=4, ap=4). Negative raw values "
+            "normalize as GRID_IMPORT. "
+            "positive_evidence_status=NOT_ASSESSED: export not anchored. "
+            "Positive raw values return PROFILE_NOT_CONFIRMED until a "
+            "natural authorized export event with ST_PG1='Selling energy' "
+            "is collected. profile.status=CONFIRMED is administrative only; "
+            "the per-direction evidence status is the actual gate."
         ),
     },
     "pv_c_p_pvt": {
@@ -233,17 +257,17 @@ UPDATED_PROFILES = {
         "negative_means": PowerDirection.UNKNOWN,
         "zero_means": PowerDirection.NO_FLOW,
         "zero_deadband_w": 5.0,
+        "positive_evidence_status": DirectionEvidenceStatus.CONFIRMED,
+        "negative_evidence_status": DirectionEvidenceStatus.NOT_ASSESSED,
         "status": ProfileStatus.CONFIRMED,
         "evidence_refs": (EVIDENCE_REF,),
         "profile_version": PROFILE_VERSION,
-        "valid_from": VALID_FROM,
         "notes": (
-            "C_P_PVT: confirmed_one_direction (positive only). "
-            "PV total charging power to battery. "
-            "positive = PV generation used for battery charging (C_P_PVT>0, n=2). "
-            "zero = no PV charging. "
-            "negative = NOT_ASSESSED. "
-            "Owner-approved U2.1b.1."
+            "C_P_PVT: PV total charging power. "
+            "positive = PV generation feeding battery/inverter (CONFIRMED). "
+            "zero = no PV generation. "
+            "negative = NOT_ASSESSED (zero in practice, anomaly if observed). "
+            "Per-direction evidence: positive CONFIRMED, negative NOT_ASSESSED."
         ),
     },
     "load_e_puse_t1": {
@@ -257,205 +281,288 @@ UPDATED_PROFILES = {
         "negative_means": PowerDirection.UNKNOWN,
         "zero_means": PowerDirection.NO_FLOW,
         "zero_deadband_w": 5.0,
+        "positive_evidence_status": DirectionEvidenceStatus.CONFIRMED,
+        "negative_evidence_status": DirectionEvidenceStatus.NOT_ASSESSED,
         "status": ProfileStatus.CONFIRMED,
         "evidence_refs": (EVIDENCE_REF,),
         "profile_version": PROFILE_VERSION,
-        "valid_from": VALID_FROM,
         "notes": (
-            "E_Puse_t1: confirmed_one_direction (positive only). "
-            "Total household consumption power. "
-            "positive = load consumption (E_Puse_t1>0, n=4). "
-            "Identity confirmed: C_P_L1 + C_P_L2 == E_Puse_t1 within 0-0.4% (all 4 samples). "
-            "negative = NOT_DECLARED. "
-            "Owner-approved U2.1b.1."
-        ),
-    },
-    "load_c_p_l1": {
-        "plant_id": "SOLGREEN",
-        "canonical_field": CanonicalPowerField.FLOW_CONSUMO,
-        "source_system": SourceSystem.SOLARMAN_PLANT_FLOW,
-        "authority_class": AuthorityClass.OPERATIONAL,
-        "measurement_point": "flow:plant:c_p_l1",
-        "unit": "W",
-        "positive_means": PowerDirection.LOAD_CONSUMPTION,
-        "negative_means": PowerDirection.UNKNOWN,
-        "zero_means": PowerDirection.NO_FLOW,
-        "zero_deadband_w": 5.0,
-        "status": ProfileStatus.CONFIRMED,
-        "evidence_refs": (EVIDENCE_REF,),
-        "profile_version": PROFILE_VERSION,
-        "valid_from": VALID_FROM,
-        "notes": (
-            "C_P_L1: confirmed_one_direction (positive only). "
-            "L1 load consumption. "
-            "positive = L1 consumption (C_P_L1>0, n=4). "
-            "Validated: C_P_L1 + C_P_L2 == E_Puse_t1 identity. "
-            "negative = NOT_DECLARED. "
-            "Owner-approved U2.1b.1."
-        ),
-    },
-    "load_c_p_l2": {
-        "plant_id": "SOLGREEN",
-        "canonical_field": CanonicalPowerField.FLOW_CONSUMO,
-        "source_system": SourceSystem.SOLARMAN_PLANT_FLOW,
-        "authority_class": AuthorityClass.OPERATIONAL,
-        "measurement_point": "flow:plant:c_p_l2",
-        "unit": "W",
-        "positive_means": PowerDirection.LOAD_CONSUMPTION,
-        "negative_means": PowerDirection.UNKNOWN,
-        "zero_means": PowerDirection.NO_FLOW,
-        "zero_deadband_w": 5.0,
-        "status": ProfileStatus.CONFIRMED,
-        "evidence_refs": (EVIDENCE_REF,),
-        "profile_version": PROFILE_VERSION,
-        "valid_from": VALID_FROM,
-        "notes": (
-            "C_P_L2: confirmed_one_direction (positive only). "
-            "L2 load consumption. "
-            "positive = L2 consumption (C_P_L2>0, n=4). "
-            "Validated: C_P_L1 + C_P_L2 == E_Puse_t1 identity. "
-            "negative = NOT_DECLARED. "
-            "Owner-approved U2.1b.1."
+            "E_Puse_t1: total household consumption power. "
+            "positive = load consumption (CONFIRMED). "
+            "Identity: C_P_L1 + C_P_L2 == E_Puse_t1 within 0-0.4% (4 samples). "
+            "negative = NOT_ASSESSED. "
+            "Per-direction evidence: positive CONFIRMED, negative NOT_ASSESSED. "
+            "Replaces legacy_pre_real_evidence profile "
+            "(valid_from=2026-07-01, evidence_refs=owner_decision_2026_07_21)."
         ),
     },
 }
 
 
-# ── Deferred signals documentation ─────────────────────────────────────────────
+# ── Supporting signals (7 entries) — NOT registered ────────────────────────────
 #
-# 11 entries. None are registered in this proposal.
-# production_registry_allowed = False for all.
+# Documented to acknowledge existence and reason for non-promotion.
+# NONE of these entries are ever loaded into a PowerSignProfileRegistry.
+#
+# Reason categories:
+#   - B_C1 (unit=A): schema requires W. Current is not power.
+#   - DP1/DP2: redundant with pv_c_p_pvt (PV string sums into C_P_PVT).
+#   - C_P_L1/C_P_L2: redundant with load_e_puse_t1 (phase sums into E_Puse_t1).
+#   - UAP1/UAP2: per-phase grid signals not yet supported by schema;
+#     require CanonicalPowerField enum extension (TELEMETRY_GRID_L1/L2).
 
 
-DEFERRED_SIGNALS = [
+SUPPORTING_SIGNALS: dict[str, dict[str, object]] = {
+    "b_c1": {
+        "raw_signal": "B_C1",
+        "unit": "A",
+        "supports_profile": "battery_b_p1",
+        "observed_positive_meaning": "battery discharge current",
+        "observed_negative_meaning": "battery charge current",
+        "production_registry_allowed": False,
+        "blocking_reason": (
+            "unit=A is outside PowerSignProfile schema (Literal['W']). "
+            "Current (amperes) is a different physical quantity than power. "
+            "Requires separate derivation layer (A x V -> W)."
+        ),
+    },
+    "dp1": {
+        "raw_signal": "DP1",
+        "unit": "W",
+        "supports_profile": "pv_c_p_pvt",
+        "meaning": "PV string 1 DC power",
+        "production_registry_allowed": False,
+        "blocking_reason": (
+            "Sub-component of pv_c_p_pvt. Single authoritative profile per "
+            "(canonical_field, source_system) tuple. Aggregated into C_P_PVT."
+        ),
+    },
+    "dp2": {
+        "raw_signal": "DP2",
+        "unit": "W",
+        "supports_profile": "pv_c_p_pvt",
+        "meaning": "PV string 2 DC power",
+        "production_registry_allowed": False,
+        "blocking_reason": ("Sub-component of pv_c_p_pvt. Aggregated into C_P_PVT."),
+    },
+    "c_p_l1": {
+        "raw_signal": "C_P_L1",
+        "unit": "W",
+        "supports_profile": "load_e_puse_t1",
+        "meaning": "L1 phase load consumption",
+        "production_registry_allowed": False,
+        "blocking_reason": ("Sub-component of load_e_puse_t1. C_P_L1 + C_P_L2 == E_Puse_t1."),
+    },
+    "c_p_l2": {
+        "raw_signal": "C_P_L2",
+        "unit": "W",
+        "supports_profile": "load_e_puse_t1",
+        "meaning": "L2 phase load consumption",
+        "production_registry_allowed": False,
+        "blocking_reason": ("Sub-component of load_e_puse_t1. C_P_L1 + C_P_L2 == E_Puse_t1."),
+    },
+    "uap1": {
+        "raw_signal": "UAP1",
+        "unit": "W",
+        "supports_profile": "grid_t_a_p_o_g",
+        "negative_meaning_candidate": "L1 grid import",
+        "production_registry_allowed": False,
+        "blocking_reason": (
+            "Requires CanonicalPowerField.TELEMETRY_GRID_L1 enum extension. "
+            "Per-phase fields not in schema. UAP1 negative confirmed in "
+            "private evidence (n=4, ap=4) but deferred as family until "
+            "UAP2 ambiguity is resolved."
+        ),
+    },
+    "uap2": {
+        "raw_signal": "UAP2",
+        "unit": "W",
+        "supports_profile": "grid_t_a_p_o_g",
+        "status": "ambiguous",
+        "production_registry_allowed": False,
+        "blocking_reason": (
+            "Requires CanonicalPowerField.TELEMETRY_GRID_L2 enum extension. "
+            "Per-phase fields not in schema. UAP2 positive (n=2) observed at "
+            "night during GRID_IMPORTING regime with no selling anchor; "
+            "UAP2 negative (n=1) is a strong candidate but single observation "
+            "is insufficient. Status: ambiguous."
+        ),
+    },
+}
+
+
+# ── Deferred directions (11 entries) — NOT registered ─────────────────────────
+#
+# Each direction without owner-anchored evidence is documented here.
+# NONE of these entries are ever loaded into a PowerSignProfileRegistry.
+# Each entry references the parent authoritative profile (parent_profile).
+
+
+DEFERRED_SIGNALS: list[dict[str, object]] = [
     {
-        "signal": "T_A_P_O_G",
+        "raw_signal": "T_A_P_O_G",
         "direction": "positive",
         "proposed_meaning": "grid exporting (selling to Afinia)",
-        "canonical_field": "TELEMETRY_GRID",
+        "parent_profile": "grid_t_a_p_o_g",
         "status": "DEFERRED",
+        "evidence_count": 0,
         "reason": (
             "No ST_PG1='Selling energy' anchor confirmed. "
-            "No positive T_A_P_O_G samples observed (n=0). "
             "Requires natural authorized export event with semantic anchor."
         ),
-        "evidence_count": 0,
         "production_registry_allowed": False,
     },
     {
-        "signal": "UAP1",
+        "raw_signal": "UAP1",
         "direction": "positive",
         "proposed_meaning": "L1 phase exporting to grid",
-        "canonical_field": "TELEMETRY_GRID_L1 (proposed)",
+        "parent_profile": "grid_t_a_p_o_g",
         "status": "DEFERRED",
-        "reason": (
-            "No positive UAP1 samples observed (n=0). "
-            "Requires positive UAP1 with ST_PG1='Selling energy' anchor."
-        ),
         "evidence_count": 0,
+        "reason": "No positive UAP1 samples observed.",
         "production_registry_allowed": False,
     },
     {
-        "signal": "UAP1",
+        "raw_signal": "UAP1",
         "direction": "negative",
-        "proposed_meaning": "L1_GRID_IMPORT",
-        "canonical_field": "TELEMETRY_GRID_L1 (proposed)",
-        "status": "CONFIRMED_ONE_DIRECTION_PRIVATE",
+        "proposed_meaning": "L1 grid import",
+        "parent_profile": "grid_t_a_p_o_g",
+        "status": "DEFERRED_FAMILY_PENDING_UAP2",
+        "evidence_count": 4,
         "reason": (
             "UAP1 negative aligned with ST_PG1='Purchasing energy' (n=4, ap=4). "
             "Confirmed one-direction in private evidence. "
-            "DEFERRED as family — UAP2 ambiguity must be resolved first. "
-            "T_A_P_O_G remains the approved total-grid import signal."
+            "DEFERRED as family — UAP2 ambiguity must be resolved first."
         ),
-        "evidence_count": 4,
         "production_registry_allowed": False,
     },
     {
-        "signal": "UAP2",
+        "raw_signal": "UAP2",
         "direction": "positive",
         "proposed_meaning": "L2 phase exporting to grid",
-        "canonical_field": "TELEMETRY_GRID_L2 (proposed)",
+        "parent_profile": "grid_t_a_p_o_g",
         "status": "DEFERRED_AMBIGUOUS",
+        "evidence_count": 2,
         "reason": (
             "2 positive UAP2 samples at night during GRID_IMPORTING regime. "
-            "No ST_PG1='Selling energy' anchor. Per-phase without phase-specific anchor. "
-            "Status: ambiguous."
+            "No ST_PG1='Selling energy' anchor."
         ),
-        "evidence_count": 2,
         "production_registry_allowed": False,
     },
     {
-        "signal": "UAP2",
+        "raw_signal": "UAP2",
         "direction": "negative",
-        "proposed_meaning": "L2_GRID_IMPORT",
-        "canonical_field": "TELEMETRY_GRID_L2 (proposed)",
+        "proposed_meaning": "L2 grid import",
+        "parent_profile": "grid_t_a_p_o_g",
         "status": "DEFERRED_STRONG_CANDIDATE",
-        "reason": (
-            "1 negative UAP2 sample aligned with ST_PG1='Purchasing energy' (n=1, ap=1). "
-            "Single observation insufficient for confirmed_one_direction. "
-            "Need multiple negative samples with anchor confirmation."
-        ),
         "evidence_count": 1,
+        "reason": (
+            "1 negative UAP2 sample aligned with ST_PG1='Purchasing energy' "
+            "(n=1, ap=1). Single observation insufficient."
+        ),
         "production_registry_allowed": False,
     },
     {
-        "signal": "DP1",
+        "raw_signal": "DP1",
         "direction": "negative",
         "proposed_meaning": "reverse DC power — anomaly",
-        "canonical_field": "TELEMETRY_PV",
+        "parent_profile": "pv_c_p_pvt",
         "status": "NOT_ASSESSED",
-        "reason": "No negative DP1 samples observed. Requires investigation.",
         "evidence_count": 0,
+        "reason": "No negative DP1 samples observed.",
         "production_registry_allowed": False,
     },
     {
-        "signal": "DP2",
+        "raw_signal": "DP2",
         "direction": "negative",
         "proposed_meaning": "reverse DC power — anomaly",
-        "canonical_field": "TELEMETRY_PV",
+        "parent_profile": "pv_c_p_pvt",
         "status": "NOT_ASSESSED",
-        "reason": "No negative DP2 samples observed. Requires investigation.",
         "evidence_count": 0,
+        "reason": "No negative DP2 samples observed.",
         "production_registry_allowed": False,
     },
     {
-        "signal": "C_P_PVT",
+        "raw_signal": "C_P_PVT",
         "direction": "negative",
         "proposed_meaning": "reverse PV charging — anomaly",
-        "canonical_field": "TELEMETRY_PV",
+        "parent_profile": "pv_c_p_pvt",
         "status": "NOT_ASSESSED",
-        "reason": "No negative C_P_PVT samples observed.",
         "evidence_count": 0,
+        "reason": "No negative C_P_PVT samples observed.",
         "production_registry_allowed": False,
     },
     {
-        "signal": "C_P_L1",
+        "raw_signal": "C_P_L1",
         "direction": "negative",
         "proposed_meaning": "L1 reverse power — not declared",
-        "canonical_field": "FLOW_CONSUMO",
+        "parent_profile": "load_e_puse_t1",
         "status": "NOT_DECLARED",
-        "reason": "No negative C_P_L1 samples observed.",
         "evidence_count": 0,
+        "reason": "No negative C_P_L1 samples observed.",
         "production_registry_allowed": False,
     },
     {
-        "signal": "C_P_L2",
+        "raw_signal": "C_P_L2",
         "direction": "negative",
         "proposed_meaning": "L2 reverse power — not declared",
-        "canonical_field": "FLOW_CONSUMO",
+        "parent_profile": "load_e_puse_t1",
         "status": "NOT_DECLARED",
-        "reason": "No negative C_P_L2 samples observed.",
         "evidence_count": 0,
+        "reason": "No negative C_P_L2 samples observed.",
         "production_registry_allowed": False,
     },
     {
-        "signal": "E_Puse_t1",
+        "raw_signal": "E_Puse_t1",
         "direction": "negative",
         "proposed_meaning": "reverse consumption — not declared",
-        "canonical_field": "FLOW_CONSUMO",
+        "parent_profile": "load_e_puse_t1",
         "status": "NOT_DECLARED",
-        "reason": "No negative E_Puse_t1 samples observed.",
         "evidence_count": 0,
+        "reason": "No negative E_Puse_t1 samples observed.",
         "production_registry_allowed": False,
     },
+]
+
+
+# ── Validation helpers (local-only, not exported) ─────────────────────────────
+
+
+def is_promotable(profile_dict: dict[str, object]) -> bool:
+    """Return True iff `profile_dict` can be promoted as a PowerSignProfile.
+
+    Supporting signals and deferred signals carry
+    `production_registry_allowed=False`; this helper short-circuits those.
+    PowerSignProfile entries must declare `unit="W"`.
+    """
+    if profile_dict.get("production_registry_allowed") is False:
+        return False
+    return profile_dict.get("unit") == "W"
+
+
+def count_supporting_signals_not_promotable() -> int:
+    """Return the count of SUPPORTING_SIGNALS with production_registry_allowed=False."""
+    return sum(
+        1
+        for entry in SUPPORTING_SIGNALS.values()
+        if entry.get("production_registry_allowed") is False
+    )
+
+
+def count_deferred_signals_not_promotable() -> int:
+    """Return the count of DEFERRED_SIGNALS with production_registry_allowed=False."""
+    return sum(1 for entry in DEFERRED_SIGNALS if entry.get("production_registry_allowed") is False)
+
+
+__all__ = [
+    "DEFERRED_SIGNALS",
+    "EVIDENCE_REF",
+    "LEGACY_EVIDENCE_REF",
+    "PROFILE_VERSION",
+    "SUPPORTING_SIGNALS",
+    "UPDATED_PROFILES",
+    "build_updated_profiles",
+    "count_deferred_signals_not_promotable",
+    "count_supporting_signals_not_promotable",
+    "is_promotable",
 ]
