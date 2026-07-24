@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass, field
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from solgreen.energy.normalization import (
     NormalizationStatus,
@@ -19,6 +19,9 @@ from solgreen.integrations.solarman.snapshot import (
     SolarmanSnapshot,
     parse_current_data_to_snapshot,
 )
+
+if TYPE_CHECKING:
+    from solgreen.integrations.solarman.energy_runtime import SolarmanEnergyRuntimeResult
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +43,7 @@ class DeviceSyncResult:
     energy_series_attempted: int = 0
     energy_series_succeeded: int = 0
     energy_series_failed: int = 0
+    energy_result: SolarmanEnergyRuntimeResult | None = None
 
 
 @dataclass
@@ -59,6 +63,7 @@ class SyncResult:
     energy_series_attempted: int = 0
     energy_series_succeeded: int = 0
     energy_series_failed: int = 0
+    energy_profile_version: str | None = None
 
     @property
     def success(self) -> bool:
@@ -113,6 +118,8 @@ def sync_solarman_station(
         plant_id=plant_id,
         devices_queried=len(devices),
     )
+    if energy_ctx is not None and energy_ctx.mode.name != "OFF":
+        result.energy_profile_version = energy_ctx.profile_version
 
     for device in devices:
         device_result, _snap_time = _sync_device(
@@ -208,7 +215,7 @@ def _sync_device(
         if (
             energy_ctx is not None
             and energy_ctx.mode.name != "OFF"
-            and result.snapshot_inserted
+            and saved is not None
             and snapshot.collection_time is not None
         ):
             from solgreen.integrations.solarman.energy_runtime import (
@@ -227,6 +234,7 @@ def _sync_device(
                     period_start=period_start,
                     period_end=period_end,
                 )
+                result.energy_result = energy_result
                 result.energy_series_attempted = energy_result.series_attempted
                 result.energy_series_succeeded = energy_result.series_succeeded
                 result.energy_series_failed = energy_result.series_failed
@@ -278,10 +286,7 @@ def _normalize_snapshot(
         battery_charge_w: float | None = direction.battery_charge_w
         battery_discharge_w: float | None = direction.battery_discharge_w
 
-        if (
-            status is NormalizationStatus.NORMALIZED
-            or status is NormalizationStatus.PROFILE_NOT_CONFIRMED
-        ):
+        if status is NormalizationStatus.NORMALIZED:
             if canonical_field == CanonicalPowerField.TELEMETRY_GRID:
                 if grid_import_w is None and grid_export_w is None:
                     pass
@@ -289,8 +294,6 @@ def _normalize_snapshot(
                     grid_export_w = 0.0
                 elif grid_export_w is not None and grid_import_w is None:
                     grid_import_w = 0.0
-                else:
-                    pass
             elif canonical_field == CanonicalPowerField.TELEMETRY_BATTERY:
                 if battery_charge_w is None and battery_discharge_w is None:
                     pass
@@ -298,8 +301,6 @@ def _normalize_snapshot(
                     battery_discharge_w = 0.0
                 elif battery_discharge_w is not None and battery_charge_w is None:
                     battery_charge_w = 0.0
-                else:
-                    pass
 
         entries.append(
             {

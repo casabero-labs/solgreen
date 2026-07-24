@@ -1148,9 +1148,11 @@ def _sync_success(
     if result.energy_series_attempted > 0:
         output["energy_integration"] = {
             "enabled": True,
+            "profile_version": result.energy_profile_version,
             "series_attempted": result.energy_series_attempted,
             "series_succeeded": result.energy_series_succeeded,
             "series_failed": result.energy_series_failed,
+            "results_persisted": False,
         }
 
     if json_output:
