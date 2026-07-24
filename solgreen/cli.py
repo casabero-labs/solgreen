@@ -887,6 +887,8 @@ def solarman_sync(
     lock_exc: Exception | None = None
     conn = None
     lock = None
+    resolved_id = ""
+    masked_id = ""
 
     try:
         resolved = resolve_station(
@@ -896,83 +898,82 @@ def solarman_sync(
         )
         resolved_id = resolved.station_id
         masked_id = resolved.masked_id
-    except StationResolutionError as exc:
-        _sync_error(
-            status="FAILED",
-            status_detail=sanitize_error(str(exc)),
+
+        norm_ctx = build_normalization_context(
+            cli_mode=sign_normalization_mode,
+            cli_effective_from=sign_registry_effective_from,
             plant_id=plant_id,
-            masked_id=mask_station_id(station_id or ""),
-            json_output=json_output,
-            start_ms=start_ms,
         )
-        raise typer.Exit(code=1) from None
-    finally:
-        client.close()
 
-    norm_ctx = build_normalization_context(
-        cli_mode=sign_normalization_mode,
-        cli_effective_from=sign_registry_effective_from,
-        plant_id=plant_id,
-    )
+        persist = not no_db and db_url is not None
 
-    persist = not no_db and db_url is not None
+        if persist and not dry_run:
+            conn = get_connection(db_url)
+            lock, lock_status = acquire_sync_lock(conn, plant_id, resolved_id)
+            if lock_status == LockStatus.BUSY:
+                _sync_skipped_locked(
+                    plant_id=plant_id,
+                    masked_id=masked_id,
+                    json_output=json_output,
+                    start_ms=start_ms,
+                )
+                raise typer.Exit(code=0)
+            if lock_status == LockStatus.ERROR:
+                _sync_error(
+                    status="FAILED",
+                    status_detail="advisory_lock_acquire_failed",
+                    plant_id=plant_id,
+                    masked_id=masked_id,
+                    json_output=json_output,
+                    start_ms=start_ms,
+                )
+                raise typer.Exit(code=1) from None
 
-    if persist and not dry_run:
-        conn = get_connection(db_url)
-        lock, lock_status = acquire_sync_lock(conn, plant_id, resolved_id)
-        if lock_status == LockStatus.BUSY:
-            _sync_skipped_locked(
+        dry_conn = None if dry_run else conn
+
+        try:
+            result = sync_solarman_station(
+                client=client,
+                station_id=resolved_id,
                 plant_id=plant_id,
-                masked_id=masked_id,
-                json_output=json_output,
-                start_ms=start_ms,
+                norm_ctx=norm_ctx,
+                conn=dry_conn,
             )
-            if conn:
-                conn.close()
-            raise typer.Exit(code=0)
-        if lock_status == LockStatus.ERROR:
+        except Exception as exc:
+            sync_exc = exc
+            result = None
+
+        release_status: LockStatus | None = None
+        if lock is not None:
+            try:
+                release_status = lock.release()
+            except Exception as exc:
+                lock_exc = exc
+                release_status = LockStatus.ERROR
+
+        duration_ms = int(time.time() * 1000) - start_ms
+
+        if result is None:
+            if release_status == LockStatus.ERROR or lock_exc is not None:
+                _sync_error(
+                    status="FAILED",
+                    status_detail="advisory_lock_release_failed",
+                    plant_id=plant_id,
+                    masked_id=masked_id,
+                    json_output=json_output,
+                    start_ms=start_ms,
+                )
+                raise typer.Exit(code=1) from None
             _sync_error(
                 status="FAILED",
-                status_detail="advisory_lock_acquire_failed",
+                status_detail=sanitize_error(str(sync_exc)) if sync_exc else "unknown sync error",
                 plant_id=plant_id,
                 masked_id=masked_id,
                 json_output=json_output,
                 start_ms=start_ms,
             )
-            if conn:
-                conn.close()
             raise typer.Exit(code=1) from None
 
-    dry_conn = None if dry_run else conn
-
-    try:
-        result = sync_solarman_station(
-            client=client,
-            station_id=resolved_id,
-            plant_id=plant_id,
-            norm_ctx=norm_ctx,
-            conn=dry_conn,
-        )
-    except Exception as exc:
-        sync_exc = exc
-        result = None
-
-    release_status: LockStatus | None = None
-    if lock is not None:
-        try:
-            release_status = lock.release()
-        except Exception as exc:
-            lock_exc = exc
-            release_status = LockStatus.ERROR
-
-    if conn is not None:
-        with contextlib.suppress(Exception):
-            conn.close()
-        conn = None
-
-    duration_ms = int(time.time() * 1000) - start_ms
-
-    if result is None:
         if release_status == LockStatus.ERROR or lock_exc is not None:
             _sync_error(
                 status="FAILED",
@@ -983,60 +984,57 @@ def solarman_sync(
                 start_ms=start_ms,
             )
             raise typer.Exit(code=1) from None
-        _sync_error(
-            status="FAILED",
-            status_detail=sanitize_error(str(sync_exc)) if sync_exc else "unknown sync error",
-            plant_id=plant_id,
-            masked_id=masked_id,
-            json_output=json_output,
-            start_ms=start_ms,
-        )
-        raise typer.Exit(code=1) from None
 
-    if release_status == LockStatus.ERROR or lock_exc is not None:
-        _sync_error(
-            status="FAILED",
-            status_detail="advisory_lock_release_failed",
-            plant_id=plant_id,
-            masked_id=masked_id,
-            json_output=json_output,
-            start_ms=start_ms,
-        )
-        raise typer.Exit(code=1) from None
+        if dry_run:
+            _sync_success(
+                status="DRY_RUN_SUCCESS",
+                plant_id=plant_id,
+                masked_id=masked_id,
+                result=result,
+                json_output=json_output,
+                dry_run=True,
+                duration_ms=duration_ms,
+            )
+            raise typer.Exit(code=0)
 
-    if dry_run:
+        if result.devices_queried == 0 or result.devices_succeeded == 0:
+            status = "FAILED"
+            exit_code = 1
+        elif result.errors or result.not_confirmed_count > 0:
+            status = "PARTIAL_SUCCESS"
+            exit_code = 0
+        else:
+            status = "SUCCESS"
+            exit_code = 0
+
         _sync_success(
-            status="DRY_RUN_SUCCESS",
+            status=status,
             plant_id=plant_id,
             masked_id=masked_id,
             result=result,
             json_output=json_output,
-            dry_run=True,
+            dry_run=False,
             duration_ms=duration_ms,
+            warnings=["distributed_lock_disabled"] if not persist else None,
         )
-        raise typer.Exit(code=0)
+        raise typer.Exit(code=exit_code)
 
-    if result.devices_queried == 0 or result.devices_succeeded == 0:
-        status = "FAILED"
-        exit_code = 1
-    elif result.errors or result.not_confirmed_count > 0:
-        status = "PARTIAL_SUCCESS"
-        exit_code = 0
-    else:
-        status = "SUCCESS"
-        exit_code = 0
+    except StationResolutionError as exc:
+        _sync_error(
+            status="FAILED",
+            status_detail=sanitize_error(str(exc)),
+            plant_id=plant_id,
+            masked_id=mask_station_id(station_id or ""),
+            json_output=json_output,
+            start_ms=start_ms,
+        )
+        raise typer.Exit(code=1) from None
 
-    _sync_success(
-        status=status,
-        plant_id=plant_id,
-        masked_id=masked_id,
-        result=result,
-        json_output=json_output,
-        dry_run=False,
-        duration_ms=duration_ms,
-        warnings=["distributed_lock_disabled"] if not persist else None,
-    )
-    raise typer.Exit(code=exit_code)
+    finally:
+        if conn is not None:
+            with contextlib.suppress(Exception):
+                conn.close()
+        client.close()
 
 
 def _sync_success(

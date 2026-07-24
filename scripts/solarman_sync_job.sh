@@ -113,8 +113,10 @@ SYNC_CMD+=(--json)
 # Optionally run doctor first
 if [[ "${SOLGREEN_SYNC_SKIP_DOCTOR:-}" != "1" ]]; then
     log "Running pre-sync doctor check..."
+    set +e
     DOCTOR_OUTPUT=$(uv run solgreen solarman doctor --json 2>&1)
     DOCTOR_EXIT=$?
+    set -e
 
     if [[ $DOCTOR_EXIT -ne 0 ]]; then
         log "Doctor check exited with code $DOCTOR_EXIT — halting pipeline"

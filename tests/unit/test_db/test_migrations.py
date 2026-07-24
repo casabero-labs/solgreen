@@ -129,9 +129,9 @@ class TestMigrationRunner:
             runner._conn = mock_conn
 
             applied = runner.apply(p)
-            assert len(applied) == 1
-            assert applied[0].version == 1
-            mock_conn.commit.assert_called()
+            assert len(applied) == 0
+            mock_conn.rollback.assert_called()
+            assert mock_conn.commit.call_count == 1
 
     def test_apply_concurrent_checksum_mismatch_raises(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

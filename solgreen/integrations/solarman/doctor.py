@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import StrEnum
-from pathlib import Path
 from typing import Any
 
 import psycopg2
@@ -267,13 +266,12 @@ def _check_database(result: DoctorResult, db_url: str) -> None:
             distributed_lock_enabled=True,
         )
         runner = get_migration_runner(conn)
-        migrations_path = Path(__file__).parent.parent / "db" / "migrations"
-        applied, pending = runner.status(migrations_path)
+        applied, pending = runner.status()
 
         if pending:
             result.add(
                 "migrations",
-                CheckStatus.WARN,
+                CheckStatus.FAIL,
                 f"{len(pending)} migration(s) pending: {[p.name for p in pending]}",
                 pending_count=len(pending),
             )

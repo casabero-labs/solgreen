@@ -181,6 +181,8 @@ class MigrationRunner:
                             f"Migration {migration.version} name drift during concurrent insert. "
                             f"File: {migration.name}, DB: {db_name}"
                         )
+                    self._conn.rollback()
+                    continue
                 else:
                     with self._conn.cursor() as cur:
                         cur.execute(
