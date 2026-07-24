@@ -78,3 +78,80 @@ class TestDoctorCli:
         assert "token" not in output_lower
         assert "password" not in output_lower
         assert "secret" not in output_lower
+
+    def test_doctor_json_ready_true_exit_0(self) -> None:
+        from unittest.mock import patch
+
+        mock_result = DoctorResult()
+        mock_result.add("config", CheckStatus.PASS, "Configuration valid")
+
+        with patch(
+            "solgreen.integrations.solarman.settings.build_settings_from_env"
+        ) as mock_settings:
+            mock_settings.return_value = None
+            with patch(
+                "solgreen.integrations.solarman.doctor.run_doctor",
+                return_value=mock_result,
+            ):
+                result = runner.invoke(
+                    app,
+                    ["solarman", "doctor", "--json"],
+                )
+                import json
+
+                output = json.loads(result.stdout)
+                assert result.exit_code == 0
+                assert output["ok"] is True
+                assert output["ready"] is True
+
+    def test_doctor_json_ready_false_exit_1(self) -> None:
+        from unittest.mock import patch
+
+        mock_result = DoctorResult()
+        mock_result.add("config", CheckStatus.PASS, "Configuration valid")
+        mock_result.add("auth", CheckStatus.FAIL, "Authentication failed")
+
+        with patch(
+            "solgreen.integrations.solarman.settings.build_settings_from_env"
+        ) as mock_settings:
+            mock_settings.return_value = None
+            with patch(
+                "solgreen.integrations.solarman.doctor.run_doctor",
+                return_value=mock_result,
+            ):
+                result = runner.invoke(
+                    app,
+                    ["solarman", "doctor", "--json"],
+                )
+                import json
+
+                output = json.loads(result.stdout)
+                assert result.exit_code == 1
+                assert output["ok"] is False
+                assert output["ready"] is False
+
+    def test_doctor_json_migrations_pending_exit_1(self) -> None:
+        from unittest.mock import patch
+
+        mock_result = DoctorResult()
+        mock_result.add("config", CheckStatus.PASS, "Configuration valid")
+        mock_result.add("migrations", CheckStatus.FAIL, "2 migration(s) pending: ['003_xxx']")
+
+        with patch(
+            "solgreen.integrations.solarman.settings.build_settings_from_env"
+        ) as mock_settings:
+            mock_settings.return_value = None
+            with patch(
+                "solgreen.integrations.solarman.doctor.run_doctor",
+                return_value=mock_result,
+            ):
+                result = runner.invoke(
+                    app,
+                    ["solarman", "doctor", "--json"],
+                )
+                import json
+
+                output = json.loads(result.stdout)
+                assert result.exit_code == 1
+                assert output["ok"] is False
+                assert output["ready"] is False

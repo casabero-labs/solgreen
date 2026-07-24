@@ -848,6 +848,73 @@ class TestSyncCliFlags:
             assert all(c == 0 for c in close_called_during_sync)
             mock_client.close.assert_called_once()
 
+    def test_sync_json_output_sanitizes_errors(self) -> None:
+        import json
+        from unittest.mock import MagicMock, patch
+
+        mock_resolved = MagicMock()
+        mock_resolved.station_id = "ST001"
+        mock_resolved.masked_id = "ST**"
+
+        mock_settings = MagicMock()
+
+        mock_result = MagicMock()
+        mock_result.devices_queried = 1
+        mock_result.devices_succeeded = 0
+        mock_result.errors = [
+            "Connection to postgresql://user:secret123@db.example.com:5432 failed",
+            "Authentication failed for token=abc123xyz",
+            "app_secret=mysecret123 user email=test@test.com station_id=ST001 device_sn=ABC123",
+        ]
+        mock_result.not_confirmed_count = 0
+        mock_result.snapshots_inserted = 0
+        mock_result.snapshots_skipped = 0
+        mock_result.normalized_count = 0
+        mock_result.not_found_count = 0
+        mock_result.error_count = 3
+
+        with (
+            patch(
+                "solgreen.integrations.solarman.settings.build_settings_from_env",
+                return_value=mock_settings,
+            ),
+            patch(
+                "solgreen.integrations.solarman.station_resolver.resolve_station",
+                return_value=mock_resolved,
+            ),
+            patch(
+                "solgreen.integrations.solarman.sync.sync_solarman_station",
+                return_value=mock_result,
+            ),
+        ):
+            result = runner.invoke(
+                app,
+                [
+                    "solarman",
+                    "sync",
+                    "--json",
+                    "--plant-id",
+                    "X",
+                    "--station-id",
+                    "ST001",
+                ],
+            )
+            assert result.exit_code == 1
+            output = json.loads(result.stdout)
+            assert output["ok"] is False
+            assert output["error_count"] == 3
+            assert isinstance(output["errors"], list)
+            assert len(output["errors"]) == 3
+
+            stdout_lower = result.stdout.lower()
+            assert "secret123" not in stdout_lower
+            assert "abc123xyz" not in stdout_lower
+            assert "mysecret123" not in stdout_lower
+            assert "test@test.com" not in stdout_lower
+            assert "st001" not in stdout_lower
+            assert "abc123" not in stdout_lower
+            assert "postgresql://user:secret123@" not in stdout_lower
+
 
 class TestSyncSkippedLocked:
     def test_skipped_locked_exit_0(self) -> None:

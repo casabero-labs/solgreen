@@ -799,8 +799,10 @@ def solarman_doctor(
         raise typer.Exit(code=1) from None
 
     if json_output:
-        output = {"ok": True, **result.to_dict()}
+        output = {"ok": result.ready, **result.to_dict()}
         typer.echo(json.dumps(output, indent=2))
+        if not result.ready:
+            raise typer.Exit(code=1)
     else:
         summary = result.to_dict()["summary"]
         typer.echo(
@@ -1065,7 +1067,8 @@ def _sync_success(
         "duration_ms": duration_ms,
     }
     if result.errors:
-        output["errors"] = result.errors[:10]
+        sanitized_errors = [sanitize_error(str(error)) for error in result.errors[:10]]
+        output["errors"] = sanitized_errors
     if json_output:
         typer.echo(json.dumps(output))
     else:
@@ -1082,7 +1085,7 @@ def _sync_success(
         typer.echo(f"Error count: {result.error_count}")
         if result.errors:
             typer.echo(f"Errors: {len(result.errors)}")
-            for err in result.errors[:5]:
+            for err in sanitized_errors[:5]:
                 typer.echo(f"  - {err}")
         if warnings:
             for w in warnings:
