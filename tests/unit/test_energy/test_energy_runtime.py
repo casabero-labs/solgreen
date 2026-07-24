@@ -859,3 +859,261 @@ class TestRunEnergyIntegration:
         assert result.series_failed == 1
         assert len(result.per_series_errors) == 1
         assert "db error" in result.per_series_errors[0][1]
+
+    def test_location_rows_produces_observations(self) -> None:
+        from solgreen.integrations.solarman.energy_runtime import (
+            run_energy_integration,
+        )
+
+        conn = MagicMock()
+        cur = MagicMock()
+        conn.cursor.return_value.__enter__ = MagicMock(return_value=cur)
+        conn.cursor.return_value.__exit__ = MagicMock(return_value=None)
+
+        ts1 = datetime(2025, 7, 24, 9, 0, 0, tzinfo=UTC)
+
+        grid_row = (
+            1,
+            ts1,
+            "P1",
+            "S1",
+            "D001",
+            "key_grid",
+            "telemetry_grid_power_w",
+            "inverter_telemetry",
+            "normalized",
+            "v1",
+            1000.0,
+            0.0,
+            None,
+            None,
+            None,
+            None,
+        )
+        battery_row = (
+            2,
+            ts1,
+            "P1",
+            "S1",
+            "D001",
+            "key_battery",
+            "telemetry_battery_power_w",
+            "inverter_telemetry",
+            "normalized",
+            "v1",
+            None,
+            None,
+            200.0,
+            0.0,
+            None,
+            None,
+        )
+        pv_row = (
+            3,
+            ts1,
+            "P1",
+            "S1",
+            "D001",
+            "key_pv",
+            "telemetry_pv_power_w",
+            "inverter_telemetry",
+            "normalized",
+            "v1",
+            None,
+            None,
+            None,
+            None,
+            4000.0,
+            None,
+        )
+        cur.fetchall.side_effect = [
+            [grid_row, grid_row],  # GRID_IMPORT & GRID_EXPORT use same rows
+            [grid_row, grid_row],
+            [battery_row, battery_row],
+            [battery_row, battery_row],
+            [pv_row],
+        ]
+
+        result = run_energy_integration(
+            conn=conn,
+            plant_id="P1",
+            station_id="S1",
+            device_sn="D001",
+            context=_make_test_context(),
+            period_start=datetime(2025, 7, 24, 8, 0, 0, tzinfo=UTC),
+            period_end=datetime(2025, 7, 24, 10, 0, 0, tzinfo=UTC),
+        )
+        assert result.series_attempted == 5
+        assert result.series_succeeded == 5
+
+    def test_unknown_normalization_status_raises(self) -> None:
+        from solgreen.integrations.solarman.energy_runtime import (
+            load_persisted_signal_rows,
+        )
+
+        conn = MagicMock()
+        cur = MagicMock()
+        conn.cursor.return_value.__enter__ = MagicMock(return_value=cur)
+        conn.cursor.return_value.__exit__ = MagicMock(return_value=None)
+
+        db_row = (
+            1,
+            datetime(2025, 7, 24, 9, 0, 0, tzinfo=UTC),
+            "P1",
+            "S1",
+            "D001",
+            "key_grid",
+            "telemetry_grid_power_w",
+            "inverter_telemetry",
+            "INVALID_STATUS",
+            "v1",
+            500.0,
+            0.0,
+            None,
+            None,
+            None,
+            None,
+        )
+        cur.fetchall.return_value = [db_row]
+
+        with pytest.raises(ValueError, match="Unknown persisted normalization status"):
+            load_persisted_signal_rows(
+                conn=conn,
+                plant_id="P1",
+                station_id="S1",
+                device_sn="D001",
+                canonical_field=CanonicalPowerField.TELEMETRY_GRID,
+                source_system=SourceSystem.INVERTER_TELEMETRY,
+                period_start=datetime(2025, 7, 24, 8, 0, 0, tzinfo=UTC),
+                period_end=datetime(2025, 7, 24, 10, 0, 0, tzinfo=UTC),
+            )
+
+    def test_unknown_canonical_field_raises(self) -> None:
+        from solgreen.integrations.solarman.energy_runtime import (
+            load_persisted_signal_rows,
+        )
+
+        conn = MagicMock()
+        cur = MagicMock()
+        conn.cursor.return_value.__enter__ = MagicMock(return_value=cur)
+        conn.cursor.return_value.__exit__ = MagicMock(return_value=None)
+
+        db_row = (
+            1,
+            datetime(2025, 7, 24, 9, 0, 0, tzinfo=UTC),
+            "P1",
+            "S1",
+            "D001",
+            "key_grid",
+            "INVALID_FIELD",
+            "inverter_telemetry",
+            "normalized",
+            "v1",
+            500.0,
+            0.0,
+            None,
+            None,
+            None,
+            None,
+        )
+        cur.fetchall.return_value = [db_row]
+
+        with pytest.raises(ValueError, match="Unknown persisted canonical field"):
+            load_persisted_signal_rows(
+                conn=conn,
+                plant_id="P1",
+                station_id="S1",
+                device_sn="D001",
+                canonical_field=CanonicalPowerField.TELEMETRY_GRID,
+                source_system=SourceSystem.INVERTER_TELEMETRY,
+                period_start=datetime(2025, 7, 24, 8, 0, 0, tzinfo=UTC),
+                period_end=datetime(2025, 7, 24, 10, 0, 0, tzinfo=UTC),
+            )
+
+    def test_unknown_source_system_raises(self) -> None:
+        from solgreen.integrations.solarman.energy_runtime import (
+            load_persisted_signal_rows,
+        )
+
+        conn = MagicMock()
+        cur = MagicMock()
+        conn.cursor.return_value.__enter__ = MagicMock(return_value=cur)
+        conn.cursor.return_value.__exit__ = MagicMock(return_value=None)
+
+        db_row = (
+            1,
+            datetime(2025, 7, 24, 9, 0, 0, tzinfo=UTC),
+            "P1",
+            "S1",
+            "D001",
+            "key_grid",
+            "telemetry_grid_power_w",
+            "INVALID_SOURCE",
+            "normalized",
+            "v1",
+            500.0,
+            0.0,
+            None,
+            None,
+            None,
+            None,
+        )
+        cur.fetchall.return_value = [db_row]
+
+        with pytest.raises(ValueError, match="Unknown persisted source system"):
+            load_persisted_signal_rows(
+                conn=conn,
+                plant_id="P1",
+                station_id="S1",
+                device_sn="D001",
+                canonical_field=CanonicalPowerField.TELEMETRY_GRID,
+                source_system=SourceSystem.INVERTER_TELEMETRY,
+                period_start=datetime(2025, 7, 24, 8, 0, 0, tzinfo=UTC),
+                period_end=datetime(2025, 7, 24, 10, 0, 0, tzinfo=UTC),
+            )
+
+    def test_empty_rows_per_series_are_integrated(self) -> None:
+        from solgreen.integrations.solarman.energy_runtime import (
+            run_energy_integration,
+        )
+
+        conn = MagicMock()
+        cur = MagicMock()
+        conn.cursor.return_value.__enter__ = MagicMock(return_value=cur)
+        conn.cursor.return_value.__exit__ = MagicMock(return_value=None)
+        cur.fetchall.return_value = []
+
+        result = run_energy_integration(
+            conn=conn,
+            plant_id="P1",
+            station_id="S1",
+            device_sn="D001",
+            context=_make_test_context(),
+            period_start=datetime(2025, 7, 24, 8, 0, 0, tzinfo=UTC),
+            period_end=datetime(2025, 7, 24, 10, 0, 0, tzinfo=UTC),
+        )
+        assert result.series_succeeded == 5
+        assert result.series_failed == 0
+
+    def test_result_frozen(self) -> None:
+        from solgreen.integrations.solarman.energy_runtime import (
+            run_energy_integration,
+        )
+
+        conn = MagicMock()
+        cur = MagicMock()
+        conn.cursor.return_value.__enter__ = MagicMock(return_value=cur)
+        conn.cursor.return_value.__exit__ = MagicMock(return_value=None)
+        cur.fetchall.return_value = []
+
+        result = run_energy_integration(
+            conn=conn,
+            plant_id="P1",
+            station_id="S1",
+            device_sn="D001",
+            context=_make_test_context(),
+            period_start=datetime(2025, 7, 24, 8, 0, 0, tzinfo=UTC),
+            period_end=datetime(2025, 7, 24, 10, 0, 0, tzinfo=UTC),
+        )
+        with pytest.raises(pydantic.ValidationError):
+            result.series_attempted = 99
