@@ -245,6 +245,7 @@ class TestPersistenceMocks:
                 "source_system": "inverter_telemetry",
                 "raw_power_w": 1200.0,
                 "normalized_status": "normalized",
+                "sign_profile_version": "legacy_v1",
                 "grid_import_w": None,
                 "grid_export_w": None,
                 "battery_charge_w": None,
@@ -698,6 +699,7 @@ class TestSyncCliFlags:
         mock_result.normalized_count = 0
         mock_result.not_found_count = 0
         mock_result.error_count = 0
+        mock_result.energy_result = None
 
         with (
             patch(
@@ -756,6 +758,7 @@ class TestSyncCliFlags:
         mock_result.normalized_count = 0
         mock_result.not_found_count = 0
         mock_result.error_count = 1
+        mock_result.energy_result = None
 
         with (
             patch(
@@ -808,6 +811,7 @@ class TestSyncCliFlags:
         mock_result.normalized_count = 5
         mock_result.not_found_count = 0
         mock_result.error_count = 0
+        mock_result.energy_result = None
 
         close_called_during_sync = []
 
@@ -876,6 +880,7 @@ class TestSyncCliFlags:
         mock_result.normalized_count = 0
         mock_result.not_found_count = 0
         mock_result.error_count = 3
+        mock_result.energy_result = None
 
         with (
             patch(
