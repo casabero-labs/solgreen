@@ -28,6 +28,13 @@ from solgreen.diagnostics.rule_evaluation import (
 )
 from solgreen.importer.detector import detect_format
 from solgreen.importer.exceptions import UnsupportedFormatError
+from solgreen.importer.normalize import (
+    ImportNormalizationContext,
+    NormalizationSummary,
+    NormalizedSignalResult,
+    build_normalization_context,
+    normalize_telemetry_signals,
+)
 from solgreen.importer.parsers.base import PLANT_FLOW_COLUMNS
 from solgreen.importer.parsers.solarman_flow import parse_plant_flow
 from solgreen.importer.parsers.solarman_telemetry import parse_inverter_telemetry
@@ -121,12 +128,15 @@ class _ParsedFile:
     source_type: SourceType
     batch: ImportBatch
     validity: dict[str, int]
+    norm_results: tuple[NormalizedSignalResult, ...] = ()
+    norm_summary: NormalizationSummary | None = None
 
 
 def _parse_single_file(
     file: Path,
     plant_id: str,
     repo: Repository | None = None,
+    norm_ctx: ImportNormalizationContext | None = None,
 ) -> _ParsedFile:
     source_type = detect_format(file)
     if source_type == SourceType.UNKNOWN:
@@ -162,8 +172,19 @@ def _parse_single_file(
         if repo is not None:
             repo.save_import_batch(batch)
         validity = _validity_summary(tel_samples)
+
+        norm_results: tuple[NormalizedSignalResult, ...] = ()
+        norm_summary: NormalizationSummary | None = None
+        if norm_ctx is not None:
+            norm_results, norm_summary = normalize_telemetry_signals(tel_samples, norm_ctx)
+
         return _ParsedFile(
-            samples=tel_samples, source_type=source_type, batch=batch, validity=validity
+            samples=tel_samples,
+            source_type=source_type,
+            batch=batch,
+            validity=validity,
+            norm_results=norm_results,
+            norm_summary=norm_summary,
         )
 
     else:
@@ -265,6 +286,22 @@ def import_file(
             help="Fallback LLM API key.",
         ),
     ] = None,
+    sign_normalization_mode: Annotated[
+        str | None,
+        typer.Option(
+            "--sign-normalization-mode",
+            envvar="SOLGREEN_SIGN_NORMALIZATION_MODE",
+            help="Sign normalization mode: off, legacy, or d10. Default: off.",
+        ),
+    ] = None,
+    sign_registry_effective_from: Annotated[
+        str | None,
+        typer.Option(
+            "--sign-registry-effective-from",
+            envvar="SOLGREEN_SIGN_REGISTRY_EFFECTIVE_FROM",
+            help="ISO 8601 cutover timestamp for d10 mode (e.g. 2026-08-01T00:00:00Z).",
+        ),
+    ] = None,
 ) -> None:
     if align_with is not None:
         if tolerance is None:
@@ -286,8 +323,14 @@ def import_file(
         fallback_api_key=llm_fallback_api_key,
     )
 
+    norm_ctx = build_normalization_context(
+        cli_mode=sign_normalization_mode,
+        cli_effective_from=sign_registry_effective_from,
+        plant_id=plant_id,
+    )
+
     if align_with is not None:
-        _import_with_align(file, align_with, plant_id, output_dir, _tol, repo, provider)
+        _import_with_align(file, align_with, plant_id, output_dir, _tol, repo, provider, norm_ctx)
         return
 
     source_type = format_override or detect_format(file)
@@ -296,11 +339,23 @@ def import_file(
             f"Could not detect format for {file.name}"
         ) from UnsupportedFormatError(path=file, observed_columns=())
 
-    parsed = _parse_single_file(file, plant_id, repo)
+    parsed = _parse_single_file(file, plant_id, repo, norm_ctx)
     json_path = output_dir / f"{file.stem}.import.json"
     md_path = output_dir / f"{file.stem}.import.md"
-    write_report_json(parsed.batch, parsed.validity, json_path)
-    write_report_markdown(parsed.batch, parsed.validity, md_path)
+    write_report_json(
+        parsed.batch,
+        parsed.validity,
+        json_path,
+        norm_summary=parsed.norm_summary,
+        norm_results=parsed.norm_results,
+    )
+    write_report_markdown(
+        parsed.batch,
+        parsed.validity,
+        md_path,
+        norm_summary=parsed.norm_summary,
+        norm_results=parsed.norm_results,
+    )
 
     qs = parsed.batch.quality_summary
     total_rows = qs.rows_total if qs else 0
@@ -320,9 +375,10 @@ def _import_with_align(
     tol: timedelta,
     repo: Repository | None = None,
     provider: LLMProvider | None = None,
+    norm_ctx: ImportNormalizationContext | None = None,
 ) -> None:
-    parsed1 = _parse_single_file(file1, plant_id, repo)
-    parsed2 = _parse_single_file(file2, plant_id, repo)
+    parsed1 = _parse_single_file(file1, plant_id, repo, norm_ctx)
+    parsed2 = _parse_single_file(file2, plant_id, repo, norm_ctx)
 
     if parsed1.source_type == parsed2.source_type:
         raise typer.BadParameter(
