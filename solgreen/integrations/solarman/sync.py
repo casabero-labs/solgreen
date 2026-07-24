@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
 
 from solgreen.energy.normalization import (
     NormalizationStatus,
@@ -22,14 +22,14 @@ from solgreen.integrations.solarman.snapshot import (
 
 logger = logging.getLogger(__name__)
 
-MAX_RETRIES = 3
-
 
 @dataclass
 class DeviceSyncResult:
     device_sn: str = ""
     snapshot_inserted: bool = False
     snapshot_skipped: bool = False
+    normalized_inserted: int = 0
+    normalized_skipped: int = 0
     signal_count: int = 0
     authorized_eligible: int = 0
     authorized_normalized: int = 0
@@ -67,6 +67,25 @@ class SyncResult:
         )
 
 
+def _validate_timestamp(collection_time: int | None) -> int:
+    if collection_time is None:
+        raise ValueError("collection_time is None")
+    if not isinstance(collection_time, int):
+        raise ValueError(f"collection_time must be int, got {type(collection_time)}")
+    if collection_time <= 0:
+        raise ValueError(f"collection_time must be > 0, got {collection_time}")
+    return collection_time
+
+
+def _validate_signal_unit(api_key: str, sig: object) -> bool:
+    unit = getattr(sig, "unit", "")
+    return unit.strip().upper() == "W"
+
+
+def _normalize_signal_unit(unit_str: str) -> str:
+    return unit_str.strip().upper()
+
+
 def sync_solarman_station(
     client: SolarmanClient,
     station_id: str,
@@ -74,7 +93,13 @@ def sync_solarman_station(
     norm_ctx: ImportNormalizationContext | None = None,
     conn: Any | None = None,
 ) -> SyncResult:
-    devices = client.list_station_devices(station_id)
+    try:
+        devices = client.list_station_devices(station_id)
+    except Exception as exc:
+        result = SyncResult(station_id=station_id, plant_id=plant_id, devices_queried=0)
+        result.errors.append(f"list_devices: {exc}")
+        return result
+
     result = SyncResult(
         station_id=station_id,
         plant_id=plant_id,
@@ -101,8 +126,6 @@ def sync_solarman_station(
         result.error_count += device_result.authorized_errors
         if device_result.error:
             result.errors.append(f"{device_result.device_sn}: {device_result.error}")
-        if device_result.authorized_eligible > 0:
-            result.error_count += device_result.authorized_errors
 
     return result
 
@@ -127,8 +150,13 @@ def _sync_device(
         return DeviceSyncResult(device_sn=device_sn, error=str(exc))
 
     data_sn = current_data.device_sn or device_sn
-    result = DeviceSyncResult(device_sn=data_sn)
 
+    try:
+        _validate_timestamp(current_data.collection_time)
+    except ValueError as exc:
+        return DeviceSyncResult(device_sn=data_sn, error=f"invalid timestamp: {exc}")
+
+    result = DeviceSyncResult(device_sn=data_sn)
     data_list = current_data.data_list or []
 
     try:
@@ -137,7 +165,7 @@ def _sync_device(
             device_sn=data_sn,
             device_type=current_data.device_type,
             device_state=current_data.device_state,
-            collection_time_unix=current_data.collection_time or 0,
+            collection_time_unix=current_data.collection_time,  # type: ignore[arg-type]  # validated above
             station_id=station_id,
             plant_id=plant_id,
         )
@@ -154,8 +182,10 @@ def _sync_device(
     if conn is not None:
         try:
             saved = _persist_snapshot(conn, snapshot, normalized_entries)
-            result.snapshot_inserted = saved.get("inserted", False)
-            result.snapshot_skipped = saved.get("skipped", False)
+            result.snapshot_inserted = cast(bool, saved.get("inserted", False))
+            result.snapshot_skipped = cast(bool, saved.get("skipped", False))
+            result.normalized_inserted = cast(int, saved.get("normalized_inserted", 0))
+            result.normalized_skipped = cast(int, saved.get("normalized_skipped", 0))
         except Exception as exc:
             result.error = f"persist: {exc}"
             return result
@@ -180,6 +210,10 @@ def _normalize_snapshot(
 
         canonical_field = API_KEY_TO_CANONICAL_FIELD[api_key]
         result.authorized_eligible += 1
+
+        if not _validate_signal_unit(api_key, sig):
+            result.authorized_errors += 1
+            continue
 
         direction = normalize_power_value(
             plant_id=norm_ctx.plant_id,
@@ -228,69 +262,112 @@ def _persist_snapshot(
     conn: Any,
     snapshot: SolarmanSnapshot,
     normalized_entries: list[dict[str, object]],
-) -> dict[str, bool]:
+) -> dict[str, object]:
     raw_json = json.dumps(
         {k: {"value": sig.value, "unit": sig.unit} for k, sig in snapshot.signals.items()}
     )
 
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            INSERT INTO solarman_snapshots
-                (device_sn, device_type, device_state, collection_time,
-                 station_id, plant_id, raw_signals, signal_count)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-            ON CONFLICT (device_sn, collection_time) DO NOTHING
-            RETURNING id
-            """,
-            (
-                snapshot.device_sn,
-                snapshot.device_type,
-                snapshot.device_state,
-                snapshot.collection_time,
-                snapshot.station_id,
-                snapshot.plant_id,
-                raw_json,
-                len(snapshot.signals),
-            ),
-        )
-        row = cur.fetchone()
-
-    if row is None:
-        return {"inserted": False, "skipped": True}
-
-    snapshot_id = row[0]
-
-    for entry in normalized_entries:
+    try:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                INSERT INTO solarman_normalized_signals
-                    (snapshot_id, signal_key, canonical_field, source_system,
-                     raw_power_w, normalized_status,
-                     grid_import_w, grid_export_w,
-                     battery_charge_w, battery_discharge_w,
-                     pv_generation_w, load_consumption_w,
-                     warnings, within_zero_deadband)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (snapshot_id, signal_key) DO NOTHING
+                INSERT INTO solarman_snapshots
+                    (device_sn, device_type, device_state, collection_time,
+                     station_id, plant_id, raw_signals, signal_count)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (device_sn, collection_time) DO NOTHING
+                RETURNING id
                 """,
                 (
-                    snapshot_id,
-                    entry["signal_key"],
-                    entry["canonical_field"],
-                    entry["source_system"],
-                    entry["raw_power_w"],
-                    entry["normalized_status"],
-                    entry["grid_import_w"],
-                    entry["grid_export_w"],
-                    entry["battery_charge_w"],
-                    entry["battery_discharge_w"],
-                    entry["pv_generation_w"],
-                    entry["load_consumption_w"],
-                    entry["warnings"],
-                    entry["within_zero_deadband"],
+                    snapshot.device_sn,
+                    snapshot.device_type,
+                    snapshot.device_state,
+                    snapshot.collection_time,
+                    snapshot.station_id,
+                    snapshot.plant_id,
+                    raw_json,
+                    len(snapshot.signals),
                 ),
             )
-    conn.commit()
-    return {"inserted": True, "skipped": False}
+            row = cur.fetchone()
+    except Exception:
+        conn.rollback()
+        raise
+
+    if row is None:
+        snapshot_id = _resolve_existing_snapshot_id(conn, snapshot)
+        if snapshot_id is None:
+            return {
+                "inserted": False,
+                "skipped": True,
+                "normalized_inserted": 0,
+                "normalized_skipped": 0,
+            }
+    else:
+        snapshot_id = row[0]
+
+    n_inserted = 0
+    n_skipped = 0
+
+    try:
+        with conn.cursor() as cur:
+            for entry in normalized_entries:
+                cur.execute(
+                    """
+                    INSERT INTO solarman_normalized_signals
+                        (snapshot_id, signal_key, canonical_field, source_system,
+                         raw_power_w, normalized_status,
+                         grid_import_w, grid_export_w,
+                         battery_charge_w, battery_discharge_w,
+                         pv_generation_w, load_consumption_w,
+                         warnings, within_zero_deadband)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (snapshot_id, signal_key) DO NOTHING
+                    RETURNING id
+                    """,
+                    (
+                        snapshot_id,
+                        entry["signal_key"],
+                        entry["canonical_field"],
+                        entry["source_system"],
+                        entry["raw_power_w"],
+                        entry["normalized_status"],
+                        entry["grid_import_w"],
+                        entry["grid_export_w"],
+                        entry["battery_charge_w"],
+                        entry["battery_discharge_w"],
+                        entry["pv_generation_w"],
+                        entry["load_consumption_w"],
+                        entry["warnings"],
+                        entry["within_zero_deadband"],
+                    ),
+                )
+                if cur.fetchone() is not None:
+                    n_inserted += 1
+                else:
+                    n_skipped += 1
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+
+    inserted = row is not None
+    return {
+        "inserted": inserted,
+        "skipped": not inserted,
+        "normalized_inserted": n_inserted,
+        "normalized_skipped": n_skipped,
+    }
+
+
+def _resolve_existing_snapshot_id(conn: Any, snapshot: SolarmanSnapshot) -> int | None:
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT id FROM solarman_snapshots
+            WHERE device_sn = %s AND collection_time = %s
+            """,
+            (snapshot.device_sn, snapshot.collection_time),
+        )
+        row = cur.fetchone()
+    return row[0] if row else None

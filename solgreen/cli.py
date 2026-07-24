@@ -680,7 +680,9 @@ def solarman_sync(
         for err in result.errors[:5]:
             typer.echo(f"  - {err}")
 
-    if not result.success and not result.errors:
+    if result.devices_queried == 0:
+        raise typer.Exit(code=1)
+    if not result.success and not result.snapshots_skipped:
         raise typer.Exit(code=1)
 
 
