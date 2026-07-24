@@ -246,58 +246,85 @@ When sign profiles are confirmed, power signals will be normalized into directio
 
 ---
 
-## Temporal Integration Contract (Conceptual Design)
+## Temporal Integration Contract (Implemented — U2.2a)
 
-### What Each Sample Means
+### Implemented Module
 
-The temporal semantics of the data must be determined before choosing an integration method. Current unknowns:
+`solgreen/energy/integration.py` implements the pure temporal integration
+core for normalized directional power. The module is side-effect-free,
+has no I/O, and is not yet wired to the SOLARMAN sync runtime.
 
-| Unknown | SolarMAN flow | Inverter telemetry |
+### Supported Sample Semantics
+
+| Semantics | Value | Supported |
 |---|---|---|
-| Sample nature | Unknown: instantaneous read, interval average, or held value | Unknown: instantaneous read, interval average, or held value |
-| Sampling interval | Nominally 5 min, not guaranteed (gaps observed) | Nominally 5 min, not guaranteed |
-| Timestamp meaning | Unknown: start, end, or center of interval | Unknown: start, end, or center of interval |
-| Order guarantee | Not guaranteed by source system | Not guaranteed by source system |
-| Zero-duration handling | Not applicable (single timestamp per row) | Not applicable |
+| Instantaneous | `instantaneous` | Yes — samples represent instantaneous readings at the timestamp |
+| Interval average | `interval_average` | No — explicitly rejected at profile validation |
+| Unknown | `unknown` | No — explicitly rejected at profile validation |
 
-### Integration Methods Under Consideration
+Only `SampleSemantics.INSTANTANEOUS` with `IntegrationMethod.TRAPEZOIDAL`
+is supported in this slice. Semantics are **never inferred** from source
+names inside the pure domain layer.
 
-The choice of integration method depends on evidence about temporal semantics:
+### Trapezoidal Integration Formula
 
-| Method | Formula | When appropriate | Evidence needed |
-|---|---|---|---|
-| Left rectangular | `E = P(t₁) × (t₂ − t₁)` | Timestamp marks interval start | Source documentation confirming "sample captures value at timestamp" |
-| Right rectangular | `E = P(t₂) × (t₂ − t₁)` | Timestamp marks interval end | Source documentation confirming same |
-| Trapezoidal | `E = (P(t₁) + P(t₂)) × (t₂ − t₁) / 2` | Samples are instantaneous readings at known times | Known sample timing + no sawtooth artifacts |
-| Sample-and-hold | `E = P × hold_duration` | Signal is held until next update | Evidence of register/SCADA hold behavior |
-| Interval average | `E = P_avg × Δt` | Source provides average over interval | Explicit column or documentation for power average |
+For an observed interval between two consecutive instantaneous observations:
 
-**U2.0 does not select a method.** U2.2 will select and implement the integration method after temporal semantics evidence is available.
-
-### General Integration Formula
-
-```
-energy_wh = integral(power_w dt) / 3600
+```python
+duration_hours = duration.total_seconds() / 3600.0
+energy_wh = ((start_power_w + end_power_w) / 2.0) * duration_hours
 ```
 
-For discrete samples:
+No rounding is applied inside the domain layer. Full floating-point precision
+is preserved.
 
-```
-energy_wh = Σ method(p_i, p_{i+1}, Δt_i) / 3600
-```
+### Homogeneous-Series Invariant
 
-Where `method` depends on source semantics and is selected per signal.
+One `integrate_energy` call processes exactly one homogeneous directional
+series. All usable observations must share:
 
-### Edge Cases
+- canonical source field;
+- source system;
+- normalized direction;
+- sign-profile version.
 
-| Case | Handling |
-|---|---|
-| First sample in window | May not have valid Δt (no predecessor). Document integration method for first point. |
-| Last sample in window | Same consideration. |
-| Repeated timestamps | Exclude zero-duration intervals. Flag in quality. |
-| Out-of-order timestamps | Reject the sample or sort-by-timestamp with lineage note. |
-| None/NaN/Inf values | Exclude the interval. Do not interpolate. |
-| Zero-duration intervals | Exclude. Flag as `excluded_zero_duration`. |
+Mixed fields, sources, directions, or profile versions are rejected at the
+batch level. Integration does not cross sign-profile version transitions;
+the caller must split the series before integration.
+
+### Profile-Transition Policy
+
+If a sign-profile version changes within a time series, the caller must
+split the series at the transition point. `integrate_energy` rejects
+batches with mixed `profile_version` values on NORMALIZED observations.
+
+### Gap and Boundary Accounting
+
+The integration function receives explicit timezone-aware `period_start`
+and `period_end`. Observations outside `[period_start, period_end]` are
+filtered from interval processing.
+
+- **Leading boundary:** `period_start` to first in-window observation is
+  `missing` duration.
+- **Trailing boundary:** last in-window observation to `period_end` is
+  `missing` duration.
+- **Intervals exceeding `maximum_authorized_interval`** are classified as
+  `missing` with `energy_wh=None`. No interpolation or constant-power
+  assumption is applied.
+- **Zero-duration intervals** (duplicate timestamps) are
+  `excluded_zero_duration` and add no duration.
+- **Excluded intervals** (non-finite power, unconfirmed sign, etc.) are
+  counted in `excluded_duration` with `energy_wh=None`.
+
+Coverage is measured as `coverage_fraction = observed_duration / expected_duration`
+(0 to 1). Missing energy is **unknown, not zero**. Observed energy is never
+scaled to estimate 100% coverage.
+
+### Empty and Single-Observation Behavior
+
+- Empty series: zero energy, zero coverage, full period counted as missing.
+- Single observation: zero energy, zero coverage (no valid power interval
+  exists). No extrapolation from a single point.
 
 ---
 
@@ -336,44 +363,78 @@ Future energy results must separate:
 
 ---
 
-## Conceptual Energy Result Models
+## Implemented Energy Result Models (U2.2a)
 
-### EnergyInterval (U2.1/U2.2)
+### DirectionalPowerObservation (`solgreen/energy/integration.py`)
+
+Frozen Pydantic model representing one timestamped directional power
+observation.
 
 | Field | Type | Description |
 |---|---|---|
-| `start` | datetime | Interval start (UTC) |
-| `end` | datetime | Interval end (UTC) |
-| `duration` | timedelta | `end − start` |
-| `source_field` | string | Canonical field name |
-| `raw_start_power_w` | float or None | Power at interval start (raw value) |
-| `raw_end_power_w` | float or None | Power at interval end (raw value) |
-| `normalized_direction` | string or None | `import`, `export`, `charge`, `discharge`, `generation`, `consumption` |
-| `integration_method` | string | Method used (e.g. `trapezoidal`) |
-| `energy_wh` | float | Integrated energy |
-| `status` | string | `observed`, `missing`, `excluded_*` |
-| `sign_profile_version` | string or None | Which PowerSignProfile was applied |
-| `lineage` | list[str] | Transformation chain |
-| `quality_flags` | dict | Per-interval quality markers |
+| `timestamp` | datetime (tz-aware) | Observation timestamp |
+| `canonical_source` | CanonicalPowerField | Canonical field (e.g. FLOW_GRID) |
+| `source_system` | SourceSystem | Data origin (e.g. SOLARMAN_PLANT_FLOW) |
+| `direction` | PowerDirection | Directional category (grid_import, grid_export, etc.) |
+| `power_w` | float or None | Non-negative directional power, None for unusable |
+| `status` | NormalizationStatus | NORMALIZED, MISSING_VALUE, NONFINITE_VALUE, etc. |
+| `profile_version` | str or None | Sign-profile version, required when NORMALIZED |
+| `lineage` | tuple[str, ...] | Transformation chain |
 
-### EnergySummary (U2.1/U2.2)
+### EnergyInterval (`solgreen/energy/integration.py`)
+
+Frozen Pydantic model representing the integration result between two
+consecutive observations.
+
+| Field | Type | Description |
+|---|---|---|
+| `start` | datetime | Interval start |
+| `end` | datetime | Interval end |
+| `duration` | timedelta | end − start |
+| `source_field` | CanonicalPowerField | Canonical field name |
+| `source_system` | SourceSystem | Data origin |
+| `direction` | PowerDirection | Directional category |
+| `start_power_w` | float or None | Power at interval start |
+| `end_power_w` | float or None | Power at interval end |
+| `integration_method` | IntegrationMethod | trapezoidal |
+| `energy_wh` | float or None | Integrated energy, None for non-observed |
+| `status` | IntervalStatus | observed, missing, excluded_* |
+| `sign_profile_version` | str or None | Active PowerSignProfile version |
+| `lineage` | tuple[str, ...] | Transformation chain |
+| `quality_flags` | tuple[str, ...] | Per-interval quality markers |
+
+### EnergySummary (`solgreen/energy/integration.py`)
+
+Frozen Pydantic model aggregating all intervals within a period.
 
 | Field | Type | Description |
 |---|---|---|
 | `period_start` | datetime | Summary window start |
 | `period_end` | datetime | Summary window end |
-| `source` | string | `flow`, `telemetry`, `merged` |
-| `direction` | string | Directional category |
+| `source_field` | CanonicalPowerField | Canonical field |
+| `source_system` | SourceSystem | Data origin |
+| `direction` | PowerDirection | Directional category |
 | `observed_energy_wh` | float | Sum of observed interval energies |
-| `observed_energy_kwh` | float | Convenience: `observed_energy_wh / 1000` |
-| `expected_duration` | timedelta | Total window duration |
+| `observed_energy_kwh` | float | observed_energy_wh / 1000 |
+| `expected_duration` | timedelta | period_end − period_start |
 | `observed_duration` | timedelta | Sum of observed interval durations |
-| `missing_duration` | timedelta | Sum of gap durations |
-| `coverage_fraction` | float | `observed_duration / expected_duration` |
+| `missing_duration` | timedelta | Sum of missing durations |
+| `excluded_duration` | timedelta | Sum of excluded-interval durations |
+| `coverage_fraction` | float | observed_duration / expected_duration |
 | `interval_count` | int | Total intervals processed |
+| `observed_interval_count` | int | Valid observed intervals |
 | `excluded_interval_count` | int | Intervals excluded |
-| `sign_profile_version` | string or None | Active PowerSignProfile version |
-| `warnings` | list[str] | Coverage issues, sign uncertainties |
+| `sign_profile_version` | str or None | Active PowerSignProfile version |
+| `warnings` | tuple[str, ...] | Deterministic coverage/quality warnings |
+
+### IntegrationResult (`solgreen/energy/integration.py`)
+
+Immutable container for the complete integration output.
+
+| Field | Type | Description |
+|---|---|---|
+| `intervals` | tuple[EnergyInterval, ...] | Immutable interval sequence |
+| `summary` | EnergySummary | Aggregated summary |
 
 ---
 
