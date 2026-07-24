@@ -93,12 +93,10 @@ El issue #20 sigue abierto para evaluadores U3.
 
 ## Próximo paso exacto
 
-**U2.2b** — source-profile selection y runtime wiring.
-Seleccionar el IntegrationProfile concreto para cada fuente SOLARMAN,
-conectar `integrate_energy` al pipeline de sync, sin billing, sin tarifas,
-sin frontend.
+**U2.3a** — Grid import/export energy metrics and persistence contracts.
+Métricas de red (import/export), sin billing, sin tarifas, sin frontend.
 
-Evidencia U2.2a:
-- [`solgreen/energy/integration.py`](../../solgreen/energy/integration.py)
-- [`tests/unit/test_energy/test_integration.py`](../../tests/unit/test_energy/test_integration.py)
-- [`docs/qa_reports/U2_2A_TEMPORAL_INTEGRATION_RESULTS_2026-07-24.md`](../qa_reports/U2_2A_TEMPORAL_INTEGRATION_RESULTS_2026-07-24.md)
+Evidencia U2.2b:
+- [`solgreen/integrations/solarman/energy_runtime.py`](../../solgreen/integrations/solarman/energy_runtime.py)
+- [`tests/unit/test_energy/test_energy_runtime.py`](../../tests/unit/test_energy/test_energy_runtime.py)
+- [`docs/qa_reports/U2_2B_SOLARMAN_ENERGY_RUNTIME_RESULTS_2026-07-24.md`](../qa_reports/U2_2B_SOLARMAN_ENERGY_RUNTIME_RESULTS_2026-07-24.md)

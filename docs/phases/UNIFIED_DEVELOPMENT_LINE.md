@@ -46,7 +46,7 @@ Cada loop dentro del PR unificado debe:
 | U2.0 | Energy semantics discovery | U1 | DISCOVERY_COMPLETE_HUMAN_GATE_PENDING |
 | U2.1 | PowerSignProfile + normalización direccional | U2.0 | ENGINEERING_CLOSED |
 | U2.2a | Temporal integration core W→Wh | U2.1 | ENGINEERING_CLOSED |
-| U2.2b | Source-profile selection + runtime wiring | U2.2a | PLANNED |
+| U2.2b | Solarman energy runtime (persisted → integrate_energy, 5 series) | U2.2a | ENGINEERING_CLOSED |
 | U3 | Eventos, reglas y golden cases | U2, #20 | PLANNED |
 | U4 | Frontend conectado y flujos human-first | U3 | PLANNED |
 | U5 | Inteligencia económica Afinia | U2, U4 | FOUNDATION_ABSORBED |
@@ -208,6 +208,6 @@ authorization to activate.
 
 ## 15. Estado actual + próximo paso exacto
 
-**Estado actual:** R0 fusionado; economía E0 absorbida; U0 técnicamente verificado (human gate pendiente); U1 ENGINEERING_CLOSED; U2.1 ENGINEERING_CLOSED (PR #27 merged); U2.2a ENGINEERING_CLOSED (PR #31).
+**Estado actual:** R0 fusionado; economía E0 absorbida; U0 técnicamente verificado (human gate pendiente); U1 ENGINEERING_CLOSED; U2.1 ENGINEERING_CLOSED (PR #27 merged); U2.2a ENGINEERING_CLOSED (PR #31 merged); U2.2b ENGINEERING_CLOSED (PR #33).
 
-**Próximo paso exacto:** U2.2b — source-profile selection y runtime wiring del motor de integración temporal al pipeline de sync SOLARMAN.
+**Próximo paso exacto:** U2.3a — Grid import/export energy metrics and persistence contracts.

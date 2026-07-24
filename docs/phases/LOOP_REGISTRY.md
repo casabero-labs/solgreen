@@ -82,7 +82,7 @@ npm run build
 | U2.0 | Energy semantics discovery | inventario y docs | semántica energética documentada | DISCOVERY_COMPLETE_HUMAN_GATE_PENDING |
 | U2.1 | PowerSignProfile + normalización direccional | seeds y tests | contratos direccionales implementados | ENGINEERING_CLOSED |
 | U2.2a | Temporal integration core | integración trapezoidal y tests | W→Wh con sample semantics explícito | ENGINEERING_CLOSED |
-| U2.2b | Source-profile selection y runtime wiring | pipe SOLARMAN→integrate | scheduling pendiente, no billing | PLANNED |
+| U2.2b | Solarman energy runtime (persisted rows → integrate_energy) | 5 series, trapezoidal, explicit lookback | ENGINEERING_CLOSED |
 | U3 | Eventos, reglas y evidencia | golden 17/19 | eventos científicos y reglas reales | PLANNED |
 | U4 | Frontend conectado | Playwright Human-First | carga, timeline y episodios utilizables | PLANNED |
 | U5 | Afinia, cargas y escenarios | golden billing | factura y horarios reproducibles | FOUNDATION_ABSORBED |
@@ -177,13 +177,16 @@ trapezoidal.
 
 61 tests unitarios. Ruff, mypy, frontend gates limpios. PR #31.
 
-## U2.2b — Source-profile selection and runtime wiring
+## U2.2b — Solarman energy runtime
 
-### Planned
+### Implemented (ENGINEERING_CLOSED)
 
-Seleccionar `IntegrationProfile` concreto para fuentes SOLARMAN.
-Conectar `integrate_energy` al pipeline de sync. Sin billing, tarifas,
-frontend ni reportes.
+Wires persisted SOLARMAN normalized power rows to `integrate_energy()` via
+`SolarmanPersistedSignalRow` adapter and `SolarmanEnergyRuntimeResult`.
+Default mode is OFF; instantaneous mode requires explicit profile_version,
+expected_interval, maximum_interval, and lookback. Five directional series:
+GRID_IMPORT, GRID_EXPORT, BATTERY_CHARGE, BATTERY_DISCHARGE, PV_GENERATION.
+No billing, tariffs, frontend, or persistence of energy results.
 
 ### Dependencies
 

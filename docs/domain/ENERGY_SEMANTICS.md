@@ -356,11 +356,15 @@ are counted in `excluded_interval_count` and their duration is tracked in
 - Single observation: zero energy, zero coverage (no valid power interval
   exists). No extrapolation from a single point.
 
-### No Runtime Normalization Factory
+### Runtime Normalization Adapter (U2.2b)
 
-U2.2a does not include a `from_normalized()` factory or any mechanism to
-derive observations from SOLARMAN sync results. The runtime adapter
-(`from_normalized` or equivalent) is deferred to U2.2b.
+U2.2b implements `adapt_persisted_row_to_observation()` in
+`solgreen/integrations/solarman/energy_runtime.py` which converts
+`SolarmanPersistedSignalRow` database rows to `DirectionalPowerObservation`
+values for use with `integrate_energy()`. Rows with `null`
+`sign_profile_version` produce `NormalizationStatus.PROFILE_NOT_FOUND`
+observations (power_w = None). Five directional series are supported:
+GRID_IMPORT, GRID_EXPORT, BATTERY_CHARGE, BATTERY_DISCHARGE, PV_GENERATION.
 
 ---
 
