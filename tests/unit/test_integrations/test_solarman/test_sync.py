@@ -699,7 +699,9 @@ class TestSyncCliFlags:
         mock_result.normalized_count = 0
         mock_result.not_found_count = 0
         mock_result.error_count = 0
-        mock_result.energy_result = None
+        mock_result.energy_series_attempted = 0
+        mock_result.energy_series_succeeded = 0
+        mock_result.energy_series_failed = 0
 
         with (
             patch(
@@ -758,7 +760,9 @@ class TestSyncCliFlags:
         mock_result.normalized_count = 0
         mock_result.not_found_count = 0
         mock_result.error_count = 1
-        mock_result.energy_result = None
+        mock_result.energy_series_attempted = 0
+        mock_result.energy_series_succeeded = 0
+        mock_result.energy_series_failed = 0
 
         with (
             patch(
@@ -811,7 +815,9 @@ class TestSyncCliFlags:
         mock_result.normalized_count = 5
         mock_result.not_found_count = 0
         mock_result.error_count = 0
-        mock_result.energy_result = None
+        mock_result.energy_series_attempted = 0
+        mock_result.energy_series_succeeded = 0
+        mock_result.energy_series_failed = 0
 
         close_called_during_sync = []
 
@@ -880,7 +886,9 @@ class TestSyncCliFlags:
         mock_result.normalized_count = 0
         mock_result.not_found_count = 0
         mock_result.error_count = 3
-        mock_result.energy_result = None
+        mock_result.energy_series_attempted = 0
+        mock_result.energy_series_succeeded = 0
+        mock_result.energy_series_failed = 0
 
         with (
             patch(

@@ -48,6 +48,11 @@ class TestSolarmanPersistedSignalRow:
 
         ts = datetime(2025, 7, 24, 10, 0, 0, tzinfo=UTC)
         row = SolarmanPersistedSignalRow(
+            snapshot_id=1,
+            plant_id="P1",
+            station_id="S1",
+            device_sn="D001",
+            signal_key="key_grid",
             collection_time=ts,
             canonical_field=CanonicalPowerField.TELEMETRY_GRID,
             source_system=SourceSystem.INVERTER_TELEMETRY,
@@ -67,6 +72,11 @@ class TestSolarmanPersistedSignalRow:
         ts = datetime(2025, 7, 24, 10, 0, 0)
         with pytest.raises(ValueError, match="timezone-aware"):
             SolarmanPersistedSignalRow(
+                snapshot_id=1,
+                plant_id="P1",
+                station_id="S1",
+                device_sn="D001",
+                signal_key="key_grid",
                 collection_time=ts,
                 canonical_field=CanonicalPowerField.TELEMETRY_GRID,
                 source_system=SourceSystem.INVERTER_TELEMETRY,
@@ -81,6 +91,11 @@ class TestSolarmanPersistedSignalRow:
         ts = datetime(2025, 7, 24, 10, 0, 0, tzinfo=UTC)
         with pytest.raises(ValueError, match="must be finite"):
             SolarmanPersistedSignalRow(
+                snapshot_id=1,
+                plant_id="P1",
+                station_id="S1",
+                device_sn="D001",
+                signal_key="key_grid",
                 collection_time=ts,
                 canonical_field=CanonicalPowerField.TELEMETRY_GRID,
                 source_system=SourceSystem.INVERTER_TELEMETRY,
@@ -96,6 +111,11 @@ class TestSolarmanPersistedSignalRow:
         ts = datetime(2025, 7, 24, 10, 0, 0, tzinfo=UTC)
         with pytest.raises(ValueError, match="must be finite"):
             SolarmanPersistedSignalRow(
+                snapshot_id=1,
+                plant_id="P1",
+                station_id="S1",
+                device_sn="D001",
+                signal_key="key_grid",
                 collection_time=ts,
                 canonical_field=CanonicalPowerField.TELEMETRY_GRID,
                 source_system=SourceSystem.INVERTER_TELEMETRY,
@@ -111,6 +131,11 @@ class TestSolarmanPersistedSignalRow:
         ts = datetime(2025, 7, 24, 10, 0, 0, tzinfo=UTC)
         with pytest.raises(ValueError, match="must be non-negative"):
             SolarmanPersistedSignalRow(
+                snapshot_id=1,
+                plant_id="P1",
+                station_id="S1",
+                device_sn="D001",
+                signal_key="key_grid",
                 collection_time=ts,
                 canonical_field=CanonicalPowerField.TELEMETRY_GRID,
                 source_system=SourceSystem.INVERTER_TELEMETRY,
@@ -125,6 +150,11 @@ class TestSolarmanPersistedSignalRow:
 
         ts = datetime(2025, 7, 24, 10, 0, 0, tzinfo=UTC)
         row = SolarmanPersistedSignalRow(
+            snapshot_id=1,
+            plant_id="P1",
+            station_id="S1",
+            device_sn="D001",
+            signal_key="key_grid",
             collection_time=ts,
             canonical_field=CanonicalPowerField.TELEMETRY_GRID,
             source_system=SourceSystem.INVERTER_TELEMETRY,
@@ -140,6 +170,11 @@ class TestSolarmanPersistedSignalRow:
 
         ts = datetime(2025, 7, 24, 10, 0, 0, tzinfo=UTC)
         row = SolarmanPersistedSignalRow(
+            snapshot_id=1,
+            plant_id="P1",
+            station_id="S1",
+            device_sn="D001",
+            signal_key="key_grid",
             collection_time=ts,
             canonical_field=CanonicalPowerField.TELEMETRY_GRID,
             source_system=SourceSystem.INVERTER_TELEMETRY,
@@ -147,112 +182,6 @@ class TestSolarmanPersistedSignalRow:
         )
         with pytest.raises(pydantic.ValidationError):
             row.grid_import_w = 100.0
-
-
-class TestMapRowToDirectionalPower:
-    def _ts(self) -> datetime:
-        return datetime(2025, 7, 24, 10, 0, 0, tzinfo=UTC)
-
-    def test_grid_import(self) -> None:
-        from solgreen.integrations.solarman.energy_runtime import (
-            SolarmanPersistedSignalRow,
-            _map_row_to_directional_power,
-        )
-
-        row = SolarmanPersistedSignalRow(
-            collection_time=self._ts(),
-            canonical_field=CanonicalPowerField.TELEMETRY_GRID,
-            source_system=SourceSystem.INVERTER_TELEMETRY,
-            normalized_status=NormalizationStatus.NORMALIZED,
-            grid_import_w=500.0,
-        )
-        direction, magnitude = _map_row_to_directional_power(row)
-        assert direction == PowerDirection.GRID_IMPORT
-        assert magnitude == 500.0
-
-    def test_grid_export(self) -> None:
-        from solgreen.integrations.solarman.energy_runtime import (
-            SolarmanPersistedSignalRow,
-            _map_row_to_directional_power,
-        )
-
-        row = SolarmanPersistedSignalRow(
-            collection_time=self._ts(),
-            canonical_field=CanonicalPowerField.TELEMETRY_GRID,
-            source_system=SourceSystem.INVERTER_TELEMETRY,
-            normalized_status=NormalizationStatus.NORMALIZED,
-            grid_export_w=300.0,
-        )
-        direction, magnitude = _map_row_to_directional_power(row)
-        assert direction == PowerDirection.GRID_EXPORT
-        assert magnitude == 300.0
-
-    def test_battery_charge(self) -> None:
-        from solgreen.integrations.solarman.energy_runtime import (
-            SolarmanPersistedSignalRow,
-            _map_row_to_directional_power,
-        )
-
-        row = SolarmanPersistedSignalRow(
-            collection_time=self._ts(),
-            canonical_field=CanonicalPowerField.TELEMETRY_BATTERY,
-            source_system=SourceSystem.INVERTER_TELEMETRY,
-            normalized_status=NormalizationStatus.NORMALIZED,
-            battery_charge_w=200.0,
-        )
-        direction, magnitude = _map_row_to_directional_power(row)
-        assert direction == PowerDirection.BATTERY_CHARGE
-        assert magnitude == 200.0
-
-    def test_battery_discharge(self) -> None:
-        from solgreen.integrations.solarman.energy_runtime import (
-            SolarmanPersistedSignalRow,
-            _map_row_to_directional_power,
-        )
-
-        row = SolarmanPersistedSignalRow(
-            collection_time=self._ts(),
-            canonical_field=CanonicalPowerField.TELEMETRY_BATTERY,
-            source_system=SourceSystem.INVERTER_TELEMETRY,
-            normalized_status=NormalizationStatus.NORMALIZED,
-            battery_discharge_w=150.0,
-        )
-        direction, magnitude = _map_row_to_directional_power(row)
-        assert direction == PowerDirection.BATTERY_DISCHARGE
-        assert magnitude == 150.0
-
-    def test_pv_generation(self) -> None:
-        from solgreen.integrations.solarman.energy_runtime import (
-            SolarmanPersistedSignalRow,
-            _map_row_to_directional_power,
-        )
-
-        row = SolarmanPersistedSignalRow(
-            collection_time=self._ts(),
-            canonical_field=CanonicalPowerField.TELEMETRY_PV,
-            source_system=SourceSystem.INVERTER_TELEMETRY,
-            normalized_status=NormalizationStatus.NORMALIZED,
-            pv_generation_w=4000.0,
-        )
-        direction, magnitude = _map_row_to_directional_power(row)
-        assert direction == PowerDirection.PV_GENERATION
-        assert magnitude == 4000.0
-
-    def test_no_power_returns_unknown(self) -> None:
-        from solgreen.integrations.solarman.energy_runtime import (
-            SolarmanPersistedSignalRow,
-            _map_row_to_directional_power,
-        )
-
-        row = SolarmanPersistedSignalRow(
-            collection_time=self._ts(),
-            canonical_field=CanonicalPowerField.TELEMETRY_GRID,
-            source_system=SourceSystem.INVERTER_TELEMETRY,
-            normalized_status=NormalizationStatus.NORMALIZED,
-        )
-        direction, magnitude = _map_row_to_directional_power(row)
-        assert direction == PowerDirection.UNKNOWN
-        assert magnitude is None
 
 
 class TestAdaptPersistedRowToObservation:
@@ -266,6 +195,11 @@ class TestAdaptPersistedRowToObservation:
         )
 
         row = SolarmanPersistedSignalRow(
+            snapshot_id=1,
+            plant_id="P1",
+            station_id="S1",
+            device_sn="D001",
+            signal_key="key_grid",
             collection_time=self._ts(),
             canonical_field=CanonicalPowerField.TELEMETRY_GRID,
             source_system=SourceSystem.INVERTER_TELEMETRY,
@@ -286,6 +220,11 @@ class TestAdaptPersistedRowToObservation:
         )
 
         row = SolarmanPersistedSignalRow(
+            snapshot_id=1,
+            plant_id="P1",
+            station_id="S1",
+            device_sn="D001",
+            signal_key="key_grid",
             collection_time=self._ts(),
             canonical_field=CanonicalPowerField.TELEMETRY_GRID,
             source_system=SourceSystem.INVERTER_TELEMETRY,
@@ -303,6 +242,11 @@ class TestAdaptPersistedRowToObservation:
         )
 
         row = SolarmanPersistedSignalRow(
+            snapshot_id=1,
+            plant_id="P1",
+            station_id="S1",
+            device_sn="D001",
+            signal_key="key_battery",
             collection_time=self._ts(),
             canonical_field=CanonicalPowerField.TELEMETRY_BATTERY,
             source_system=SourceSystem.INVERTER_TELEMETRY,
@@ -320,6 +264,11 @@ class TestAdaptPersistedRowToObservation:
         )
 
         row = SolarmanPersistedSignalRow(
+            snapshot_id=1,
+            plant_id="P1",
+            station_id="S1",
+            device_sn="D001",
+            signal_key="key_battery",
             collection_time=self._ts(),
             canonical_field=CanonicalPowerField.TELEMETRY_BATTERY,
             source_system=SourceSystem.INVERTER_TELEMETRY,
@@ -337,6 +286,11 @@ class TestAdaptPersistedRowToObservation:
         )
 
         row = SolarmanPersistedSignalRow(
+            snapshot_id=1,
+            plant_id="P1",
+            station_id="S1",
+            device_sn="D001",
+            signal_key="key_pv",
             collection_time=self._ts(),
             canonical_field=CanonicalPowerField.TELEMETRY_PV,
             source_system=SourceSystem.INVERTER_TELEMETRY,
@@ -354,6 +308,11 @@ class TestAdaptPersistedRowToObservation:
         )
 
         row = SolarmanPersistedSignalRow(
+            snapshot_id=1,
+            plant_id="P1",
+            station_id="S1",
+            device_sn="D001",
+            signal_key="key_grid",
             collection_time=self._ts(),
             canonical_field=CanonicalPowerField.TELEMETRY_GRID,
             source_system=SourceSystem.INVERTER_TELEMETRY,
@@ -373,6 +332,11 @@ class TestAdaptPersistedRowToObservation:
         )
 
         row = SolarmanPersistedSignalRow(
+            snapshot_id=1,
+            plant_id="P1",
+            station_id="S1",
+            device_sn="D001",
+            signal_key="key_grid",
             collection_time=self._ts(),
             canonical_field=CanonicalPowerField.TELEMETRY_GRID,
             source_system=SourceSystem.INVERTER_TELEMETRY,
@@ -380,7 +344,7 @@ class TestAdaptPersistedRowToObservation:
             sign_profile_version="v1",
             grid_import_w=500.0,
         )
-        with pytest.raises(ValueError, match="does not match"):
+        with pytest.raises(ValueError, match="no magnitude for direction"):
             adapt_persisted_row_to_observation(row, PowerDirection.GRID_EXPORT)
 
     def test_non_normalized_row_produces_none_power(self) -> None:
@@ -390,6 +354,11 @@ class TestAdaptPersistedRowToObservation:
         )
 
         row = SolarmanPersistedSignalRow(
+            snapshot_id=1,
+            plant_id="P1",
+            station_id="S1",
+            device_sn="D001",
+            signal_key="key_grid",
             collection_time=self._ts(),
             canonical_field=CanonicalPowerField.TELEMETRY_GRID,
             source_system=SourceSystem.INVERTER_TELEMETRY,
@@ -742,7 +711,9 @@ class TestLoadPersistedSignalRows:
                 conn=conn,
                 plant_id="P1",
                 station_id="S1",
+                device_sn="D001",
                 canonical_field=CanonicalPowerField.TELEMETRY_GRID,
+                source_system=SourceSystem.INVERTER_TELEMETRY,
                 period_start=datetime(2025, 7, 24, 9, 0, 0),
                 period_end=datetime(2025, 7, 24, 10, 0, 0, tzinfo=UTC),
             )
@@ -758,7 +729,9 @@ class TestLoadPersistedSignalRows:
                 conn=conn,
                 plant_id="P1",
                 station_id="S1",
+                device_sn="D001",
                 canonical_field=CanonicalPowerField.TELEMETRY_GRID,
+                source_system=SourceSystem.INVERTER_TELEMETRY,
                 period_start=datetime(2025, 7, 24, 9, 0, 0, tzinfo=UTC),
                 period_end=datetime(2025, 7, 24, 10, 0, 0),
             )
@@ -778,6 +751,7 @@ class TestRunEnergyIntegration:
             conn=conn,
             plant_id="P1",
             station_id="S1",
+            device_sn="D001",
             context=ctx,
             period_start=datetime(2025, 7, 24, 9, 0, 0, tzinfo=UTC),
             period_end=datetime(2025, 7, 24, 10, 0, 0, tzinfo=UTC),
@@ -799,6 +773,7 @@ class TestRunEnergyIntegration:
             conn=conn,
             plant_id="P1",
             station_id="S1",
+            device_sn="D001",
             context=_make_test_context(),
             period_start=datetime(2025, 7, 24, 9, 0, 0, tzinfo=UTC),
             period_end=datetime(2025, 7, 24, 10, 0, 0, tzinfo=UTC),
@@ -823,6 +798,7 @@ class TestRunEnergyIntegration:
             conn=conn,
             plant_id="P1",
             station_id="S1",
+            device_sn="D001",
             context=_make_test_context(),
             period_start=datetime(2025, 7, 24, 9, 0, 0, tzinfo=UTC),
             period_end=datetime(2025, 7, 24, 10, 0, 0, tzinfo=UTC),
@@ -844,6 +820,7 @@ class TestRunEnergyIntegration:
             conn=conn,
             plant_id="P1",
             station_id="S1",
+            device_sn="D001",
             context=_make_test_context(),
             period_start=datetime(2025, 7, 24, 9, 0, 0, tzinfo=UTC),
             period_end=datetime(2025, 7, 24, 10, 0, 0, tzinfo=UTC),
@@ -872,6 +849,7 @@ class TestRunEnergyIntegration:
             conn=conn,
             plant_id="P1",
             station_id="S1",
+            device_sn="D001",
             context=_make_test_context(),
             period_start=datetime(2025, 7, 24, 9, 0, 0, tzinfo=UTC),
             period_end=datetime(2025, 7, 24, 10, 0, 0, tzinfo=UTC),
