@@ -23,13 +23,7 @@
 #   SOLGREEN_SYNC_DRY_RUN                Set to "1" for dry-run mode (default: no)
 #   SOLGREEN_SYNC_NO_DB                 Set to "1" to skip database persistence (default: no)
 #   SOLGREEN_SYNC_TIMEOUT_SECONDS        Lock timeout (default: 300)
-#
-# Coolify setup:
-#   Command: /app/scripts/solarman_sync_job.sh
-#   Variables: (all SOLGREEN_* and SOLARMAN_* vars above)
-#   Cron (example, every 5 min): */5 * * * *
-#   Timeout: 240 seconds (< interval)
-#   Health check: solgreen solarman doctor --json
+#   SOLGREEN_SYNC_SKIP_DOCTOR           Set to "1" to skip pre-sync doctor check (default: no)
 #
 set -euo pipefail
 
@@ -51,6 +45,7 @@ log() {
 #   1  — failure (API error, etc.)
 #   2  — skipped (lock busy)
 #   3  — configuration error
+#   4  — doctor check failed / not ready
 
 # Check configuration
 if [[ -z "${SOLARMAN_BASE_URL:-}" ]] || [[ -z "${SOLARMAN_APP_ID:-}" ]] || \
@@ -118,13 +113,32 @@ SYNC_CMD+=(--json)
 # Optionally run doctor first
 if [[ "${SOLGREEN_SYNC_SKIP_DOCTOR:-}" != "1" ]]; then
     log "Running pre-sync doctor check..."
-    DOCTOR_OUTPUT=$(uv run solgreen solarman doctor --json 2>&1) || true
-    if echo "$DOCTOR_OUTPUT" | python3 -c "import sys,json; d=json.load(sys.stdin); sys.exit(0 if d.get('ready', False) else 1)" 2>/dev/null; then
-        log "Doctor check passed"
-    else
-        log "Doctor check did not pass — continuing anyway (doctor is advisory)"
-        echo "$DOCTOR_OUTPUT" | python3 -c "import sys,json; print(json.dumps(json.load(sys.stdin), indent=2))" 2>/dev/null || echo "$DOCTOR_OUTPUT"
+    DOCTOR_OUTPUT=$(uv run solgreen solarman doctor --json 2>&1)
+    DOCTOR_EXIT=$?
+
+    if [[ $DOCTOR_EXIT -ne 0 ]]; then
+        log "Doctor check exited with code $DOCTOR_EXIT — halting pipeline"
+        if echo "$DOCTOR_OUTPUT" | python3 -c "import sys,json; json.load(sys.stdin); print('valid')" 2>/dev/null; then
+            echo "$DOCTOR_OUTPUT" | python3 -c "import sys,json; print(json.dumps(json.load(sys.stdin), indent=2))" 2>/dev/null
+        else
+            log "ERROR: Doctor output could not be parsed — possible configuration or network issue"
+        fi
+        exit 4
     fi
+
+    DOCTOR_READY=$(echo "$DOCTOR_OUTPUT" | python3 -c "import sys,json; d=json.load(sys.stdin); print('READY' if d.get('ready', False) else 'NOT_READY')" 2>/dev/null || echo "PARSE_ERROR")
+
+    if [[ "$DOCTOR_READY" != "READY" ]]; then
+        log "Doctor check: NOT READY — halting pipeline"
+        if [[ "$DOCTOR_READY" != "PARSE_ERROR" ]]; then
+            echo "$DOCTOR_OUTPUT" | python3 -c "import sys,json; print(json.dumps(json.load(sys.stdin), indent=2))" 2>/dev/null
+        else
+            log "ERROR: Doctor output could not be parsed — possible configuration or network issue"
+        fi
+        exit 4
+    fi
+
+    log "Doctor check passed"
 fi
 
 log "Starting SOLARMAN sync..."

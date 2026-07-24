@@ -165,12 +165,61 @@ class MigrationRunner:
                         "SELECT version, name, checksum FROM schema_migrations WHERE version = %s",
                         (migration.version,),
                     )
-                    existing = cur.fetchone()
-                    if existing is None:
+                    row = cur.fetchone()
+
+                if row is not None:
+                    _db_version, db_name, db_checksum = row
+                    if db_checksum != migration.checksum:
+                        self._conn.rollback()
+                        raise RuntimeError(
+                            f"Migration {migration.version} ({migration.name}) checksum drift detected "
+                            f"during concurrent insert. File: {migration.checksum[:16]}..., DB: {db_checksum[:16]}..."
+                        )
+                    if db_name != migration.name:
+                        self._conn.rollback()
+                        raise RuntimeError(
+                            f"Migration {migration.version} name drift during concurrent insert. "
+                            f"File: {migration.name}, DB: {db_name}"
+                        )
+                else:
+                    with self._conn.cursor() as cur:
                         cur.execute(
                             "INSERT INTO schema_migrations (version, name, checksum) VALUES (%s, %s, %s)",
                             (migration.version, migration.name, migration.checksum),
                         )
+                    try:
+                        with self._conn.cursor() as cur:
+                            cur.execute(
+                                "SELECT version, name, checksum FROM schema_migrations WHERE version = %s",
+                                (migration.version,),
+                            )
+                            confirm = cur.fetchone()
+                        if confirm is None:
+                            self._conn.rollback()
+                            raise RuntimeError(
+                                f"Migration {migration.version} was not persisted by concurrent process"
+                            )
+                        _, confirm_name, confirm_checksum = confirm
+                        if confirm_checksum != migration.checksum:
+                            self._conn.rollback()
+                            raise RuntimeError(
+                                f"Migration {migration.version} checksum drift after concurrent insert. "
+                                f"File: {migration.checksum[:16]}..., DB: {confirm_checksum[:16]}..."
+                            )
+                        if confirm_name != migration.name:
+                            self._conn.rollback()
+                            raise RuntimeError(
+                                f"Migration {migration.version} name drift after concurrent insert. "
+                                f"File: {migration.name}, DB: {confirm_name}"
+                            )
+                    except RuntimeError:
+                        raise
+                    except Exception as exc:
+                        self._conn.rollback()
+                        raise RuntimeError(
+                            f"Migration {migration.version} concurrent insert verification failed: {exc}"
+                        ) from exc
+
                 self._conn.commit()
                 applied.append(migration)
             except Exception:

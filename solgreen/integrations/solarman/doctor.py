@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import StrEnum
+from pathlib import Path
 from typing import Any
+
+import psycopg2
 
 from solgreen.integrations.solarman.client import SolarmanClient
 from solgreen.integrations.solarman.settings import SolarmanSettings
@@ -13,6 +16,7 @@ from solgreen.integrations.solarman.station_resolver import (
     get_station_from_env,
     resolve_station,
 )
+from solgreen.sanitization import sanitize_error
 
 
 class CheckStatus(StrEnum):
@@ -73,10 +77,12 @@ def run_doctor(
 
     _check_configuration(result, settings)
     if not all(c.status in (CheckStatus.PASS, CheckStatus.WARN) for c in result.checks):
+        _close_doctor_client(result)
         return result
 
     _check_authentication(result, settings)
     if not all(c.status in (CheckStatus.PASS, CheckStatus.WARN) for c in result.checks):
+        _close_doctor_client(result)
         return result
 
     client = SolarmanClient(settings)
@@ -94,7 +100,7 @@ def run_doctor(
                 masked_station_id=resolved.display,
             )
         except StationResolutionError as exc:
-            result.add("station_resolution", CheckStatus.FAIL, str(exc))
+            result.add("station_resolution", CheckStatus.FAIL, sanitize_error(str(exc)))
             return result
 
         _check_devices(result, client, resolved.station_id)
@@ -102,18 +108,19 @@ def run_doctor(
             return result
 
         _check_current_data(result, client, resolved.station_id)
-        if not all(c.status in (CheckStatus.PASS, CheckStatus.WARN) for c in result.checks):
-            return result
-
     finally:
         client.close()
 
     if db_url:
-        _check_database_with_conn(result, db_url)
+        _check_database(result, db_url)
     else:
-        _check_database(result, None)
+        _check_database_no_conn(result)
 
     return result
+
+
+def _close_doctor_client(result: DoctorResult) -> None:
+    pass
 
 
 def _check_configuration(result: DoctorResult, settings: SolarmanSettings) -> None:
@@ -131,7 +138,7 @@ def _check_configuration(result: DoctorResult, settings: SolarmanSettings) -> No
         if settings.solarman_base_url and settings.solarman_app_id and settings.solarman_app_secret:
             result.add("config", CheckStatus.PASS, "Configuration valid")
     except Exception as exc:
-        result.add("config", CheckStatus.FAIL, f"Configuration error: {exc}")
+        result.add("config", CheckStatus.FAIL, f"Configuration error: {sanitize_error(str(exc))}")
 
 
 def _check_authentication(result: DoctorResult, settings: SolarmanSettings) -> None:
@@ -145,7 +152,7 @@ def _check_authentication(result: DoctorResult, settings: SolarmanSettings) -> N
         else:
             result.add("auth", CheckStatus.FAIL, "Authentication failed: no token returned")
     except Exception as exc:
-        result.add("auth", CheckStatus.FAIL, f"Authentication failed: {exc}")
+        result.add("auth", CheckStatus.FAIL, f"Authentication failed: {sanitize_error(str(exc))}")
 
 
 def _check_devices(result: DoctorResult, client: SolarmanClient, station_id: str) -> None:
@@ -158,7 +165,9 @@ def _check_devices(result: DoctorResult, client: SolarmanClient, station_id: str
             device_count=len(devices),
         )
     except Exception as exc:
-        result.add("device_list", CheckStatus.FAIL, f"Failed to list devices: {exc}")
+        result.add(
+            "device_list", CheckStatus.FAIL, f"Failed to list devices: {sanitize_error(str(exc))}"
+        )
 
 
 def _check_current_data(result: DoctorResult, client: SolarmanClient, station_id: str) -> None:
@@ -224,10 +233,14 @@ def _check_current_data(result: DoctorResult, client: SolarmanClient, station_id
                 signals_found=len(SYNC_AUTHORIZED_KEYS & signal_keys),
             )
     except Exception as exc:
-        result.add("current_data", CheckStatus.FAIL, f"Failed to check current data: {exc}")
+        result.add(
+            "current_data",
+            CheckStatus.FAIL,
+            f"Failed to check current data: {sanitize_error(str(exc))}",
+        )
 
 
-def _check_database(result: DoctorResult, conn: Any) -> None:
+def _check_database_no_conn(result: DoctorResult) -> None:
     result.add(
         "database",
         CheckStatus.WARN,
@@ -241,61 +254,49 @@ def _check_database(result: DoctorResult, conn: Any) -> None:
     )
 
 
-def _check_database_with_conn(result: DoctorResult, db_url: str) -> None:
-    import psycopg2
+def _check_database(result: DoctorResult, db_url: str) -> None:
+    from solgreen.db.migrations.runner import get_migration_runner
 
     conn = None
     try:
         conn = psycopg2.connect(db_url)
-        cur = conn.cursor()
-        cur.execute(
-            "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'schema_migrations')"
+        result.add(
+            "database",
+            CheckStatus.PASS,
+            "Database connected",
+            distributed_lock_enabled=True,
         )
-        exists = cur.fetchone()[0]
-        cur.close()
+        runner = get_migration_runner(conn)
+        migrations_path = Path(__file__).parent.parent / "db" / "migrations"
+        applied, pending = runner.status(migrations_path)
 
-        if not exists:
+        if pending:
             result.add(
-                "database",
-                CheckStatus.PASS,
-                "Database connected; schema_migrations not found",
-                distributed_lock_enabled=True,
+                "migrations",
+                CheckStatus.WARN,
+                f"{len(pending)} migration(s) pending: {[p.name for p in pending]}",
+                pending_count=len(pending),
             )
-            result.add("migrations", CheckStatus.WARN, "schema_migrations table not found")
         else:
             result.add(
-                "database",
+                "migrations",
                 CheckStatus.PASS,
-                "Database connected; migrations table present",
-                distributed_lock_enabled=True,
+                f"{len(applied)} migration(s) applied, no pending",
+                applied_count=len(applied),
             )
-            _check_migrations_with_conn(result, conn)
+    except RuntimeError as exc:
+        sanitized = sanitize_error(str(exc))
+        if "checksum drift" in sanitized.lower() or "name drift" in sanitized.lower():
+            result.add("migrations", CheckStatus.FAIL, f"Drift detected: {sanitized}")
+        else:
+            result.add("migrations", CheckStatus.FAIL, f"Migration check failed: {sanitized}")
     except Exception as exc:
         result.add(
             "database",
             CheckStatus.FAIL,
-            f"Database connection failed: {exc}",
+            f"Database connection failed: {sanitize_error(str(exc))}",
         )
         result.add("migrations", CheckStatus.FAIL, "Database unavailable")
     finally:
         if conn:
             conn.close()
-
-
-def _check_migrations_with_conn(result: DoctorResult, conn: Any) -> None:
-    try:
-        cur = conn.cursor()
-        cur.execute("SELECT version, name FROM schema_migrations ORDER BY version")
-        rows = cur.fetchall()
-        cur.close()
-        if rows:
-            result.add(
-                "migrations",
-                CheckStatus.PASS,
-                f"{len(rows)} migration(s) applied",
-                applied_count=len(rows),
-            )
-        else:
-            result.add("migrations", CheckStatus.WARN, "No migrations applied")
-    except Exception as exc:
-        result.add("migrations", CheckStatus.FAIL, f"Failed to check migrations: {exc}")

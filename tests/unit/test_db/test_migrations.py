@@ -89,3 +89,108 @@ class TestMigrationRunner:
             runner = MigrationRunner(MagicMock())
             with pytest.raises(DuplicateVersionError):
                 runner._scan_migrations(p)
+
+    def _make_cursor_mock(self, fetchone_results: list):
+        fetchone_vals = list(fetchone_results)
+        fetchone_iter = iter(fetchone_vals)
+
+        def cursor_side_effect():
+            cur = MagicMock()
+
+            def fetchone_impl():
+                try:
+                    return next(fetchone_iter)
+                except StopIteration:
+                    return None
+
+            cur.fetchone.side_effect = fetchone_impl
+            cur.__enter__ = MagicMock(return_value=cur)
+            cur.__exit__ = MagicMock(return_value=False)
+            return cur
+
+        mock_conn = MagicMock()
+        mock_conn.cursor.side_effect = cursor_side_effect
+        return mock_conn
+
+    def test_apply_concurrent_same_row_idempotent(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            p = Path(tmpdir)
+            (p / "001_first.sql").write_text("-- first migration")
+            runner = MigrationRunner(MagicMock())
+            file_checksum = runner._scan_migrations(p)[0].checksum
+
+            runner._get_applied = MagicMock(return_value={})
+
+            mock_conn = self._make_cursor_mock(
+                [
+                    (1, "001_first", file_checksum),
+                ],
+            )
+            runner._conn = mock_conn
+
+            applied = runner.apply(p)
+            assert len(applied) == 1
+            assert applied[0].version == 1
+            mock_conn.commit.assert_called()
+
+    def test_apply_concurrent_checksum_mismatch_raises(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            p = Path(tmpdir)
+            (p / "001_first.sql").write_text("-- first migration")
+            runner = MigrationRunner(MagicMock())
+
+            runner._get_applied = MagicMock(return_value={})
+
+            mock_conn = self._make_cursor_mock(
+                [
+                    (1, "001_first", "different_checksum_value"),
+                ],
+            )
+            runner._conn = mock_conn
+
+            with pytest.raises(RuntimeError, match="checksum drift"):
+                runner.apply(p)
+
+            mock_conn.rollback.assert_called()
+
+    def test_apply_concurrent_name_mismatch_raises(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            p = Path(tmpdir)
+            (p / "001_first.sql").write_text("-- first migration")
+            runner = MigrationRunner(MagicMock())
+            file_checksum = runner._scan_migrations(p)[0].checksum
+
+            runner._get_applied = MagicMock(return_value={})
+
+            mock_conn = self._make_cursor_mock(
+                [
+                    (1, "001_wrong_name", file_checksum),
+                ],
+            )
+            runner._conn = mock_conn
+
+            with pytest.raises(RuntimeError, match="name drift"):
+                runner.apply(p)
+
+            mock_conn.rollback.assert_called()
+
+    def test_apply_insert_and_verify_commits(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            p = Path(tmpdir)
+            (p / "001_first.sql").write_text("-- first migration")
+            runner = MigrationRunner(MagicMock())
+            file_checksum = runner._scan_migrations(p)[0].checksum
+
+            runner._get_applied = MagicMock(return_value={})
+
+            mock_conn = self._make_cursor_mock(
+                [
+                    None,
+                    (1, "001_first", file_checksum),
+                ],
+            )
+            runner._conn = mock_conn
+
+            applied = runner.apply(p)
+            assert len(applied) == 1
+            mock_conn.commit.assert_called()
