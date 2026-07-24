@@ -56,9 +56,11 @@ from solgreen.timeline.episode import CanonicalEpisode, build_episodes
 from solgreen.timeline.join import DEFAULT_TOLERANCE
 
 app = typer.Typer(add_completion=False, help="Solgreen CLI", no_args_is_help=True)
+db_app = typer.Typer(add_completion=False, help="Database operations", no_args_is_help=True)
 solarman_app = typer.Typer(
     add_completion=False, help="SOLARMAN API operations", no_args_is_help=True
 )
+app.add_typer(db_app, name="db")
 app.add_typer(solarman_app, name="solarman")
 
 
@@ -531,6 +533,154 @@ def deploy_schema(
     finally:
         conn.close()
 
+@db_app.command("status")
+def db_status(
+    db_url: Annotated[
+        str | None,
+        typer.Option("--db-url", envvar="SOLGREEN_DATABASE_URL", help="PostgreSQL connection URL."),
+    ] = None,
+    migrations_dir: Annotated[
+        Path | None,
+        typer.Option("--migrations-dir", help="Path to migrations directory."),
+    ] = None,
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", help="Machine-readable JSON output."),
+    ] = False,
+) -> None:
+    import json
+
+    if db_url is None:
+        if json_output:
+            typer.echo('{"ok": false, "error": "no database URL"}')
+            raise typer.Exit(code=1)
+        raise typer.BadParameter("--db-url required or set SOLGREEN_DATABASE_URL")
+
+    from solgreen.db.connection import get_connection
+    from solgreen.db.migrations.runner import get_migration_runner
+
+    conn = get_connection(db_url)
+    try:
+        runner = get_migration_runner(conn)
+        if migrations_dir is None:
+            migrations_dir = Path(__file__).parent / "db" / "migrations"
+        status_result = runner.status(migrations_dir)
+        applied = status_result[0]
+        pending = status_result[1]
+
+        if json_output:
+            output = {
+                "ok": True,
+                "applied": [
+                    {"version": m.version, "name": m.name, "checksum": m.checksum}
+                    for m in applied
+                ],
+                "pending": [{"version": m.version, "name": m.name} for m in pending],
+            }
+            typer.echo(json.dumps(output))
+        else:
+            if not applied:
+                typer.echo("No migrations applied.")
+            else:
+                typer.echo(f"{len(applied)} migration(s) applied:")
+                for m in applied:
+                    typer.echo(f"  {m.version}: {m.name} ({m.checksum[:8]}...) at {m.applied_at}")
+            if pending:
+                typer.echo(f"\n{len(pending)} migration(s) pending:")
+                for p in pending:
+                    typer.echo(f"  {p.version}: {p.name}")
+            else:
+                typer.echo("\nAll migrations applied.")
+    finally:
+        conn.close()
+
+
+@db_app.command("migrate")
+def db_migrate(
+    db_url: Annotated[
+        str | None,
+        typer.Option("--db-url", envvar="SOLGREEN_DATABASE_URL", help="PostgreSQL connection URL."),
+    ] = None,
+    migrations_dir: Annotated[
+        Path | None,
+        typer.Option("--migrations-dir", help="Path to migrations directory."),
+    ] = None,
+    target_version: Annotated[
+        int | None,
+        typer.Option("--to", help="Apply up to and including this version."),
+    ] = None,
+    dry_run: Annotated[
+        bool,
+        typer.Option("--dry-run", help="Show what would be applied without applying."),
+    ] = False,
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", help="Machine-readable JSON output."),
+    ] = False,
+) -> None:
+    import json
+
+    if db_url is None:
+        if json_output:
+            typer.echo('{"ok": false, "error": "no database URL"}')
+            raise typer.Exit(code=1)
+        raise typer.BadParameter("--db-url required or set SOLGREEN_DATABASE_URL")
+
+    from solgreen.db.connection import get_connection
+    from solgreen.db.migrations.runner import MigrationFile, get_migration_runner
+
+    conn = get_connection(db_url)
+    try:
+        runner = get_migration_runner(conn)
+        if migrations_dir is None:
+            migrations_dir = Path(__file__).parent / "db" / "migrations"
+
+        if dry_run:
+            status_result = runner.status(migrations_dir)
+            pending_dr: list[MigrationFile] = status_result[1]
+            if target_version is not None:
+                pending_to_apply = [m for m in pending_dr if m.version <= target_version]
+            else:
+                pending_to_apply = pending_dr
+            if json_output:
+                typer.echo(json.dumps({
+                    "ok": True,
+                    "dry_run": True,
+                    "would_apply": [
+                        {"version": m.version, "name": m.name} for m in pending_to_apply
+                    ],
+                }))
+            else:
+                if not pending_to_apply:
+                    typer.echo("No migrations to apply.")
+                else:
+                    typer.echo(f"Would apply {len(pending_to_apply)} migration(s):")
+                    for m in pending_to_apply:
+                        typer.echo(f"  {m.version}: {m.name}")
+            return
+
+        applied_migrations: list[MigrationFile] = runner.apply(migrations_dir, target_version)
+        if json_output:
+            typer.echo(json.dumps({
+                "ok": True,
+                "applied": [
+                    {"version": m.version, "name": m.name} for m in applied_migrations
+                ],
+            }))
+        else:
+            if not applied_migrations:
+                typer.echo("No new migrations to apply.")
+            else:
+                typer.echo(f"Applied {len(applied_migrations)} migration(s):")
+                for m in applied_migrations:
+                    typer.echo(f"  {m.version}: {m.name}")
+    except RuntimeError as exc:
+        if json_output:
+            typer.echo(json.dumps({"ok": False, "error": str(exc)}))
+        raise typer.Exit(code=1) from None
+    finally:
+        conn.close()
+
 
 @app.command("health-check")
 def health_check(
@@ -595,6 +745,62 @@ def health_check(
         raise typer.Exit(code=1)
 
 
+@solarman_app.command("doctor")
+def solarman_doctor(
+    station_id: Annotated[
+        str | None,
+        typer.Option("--station-id", help="Specific station ID to diagnose."),
+    ] = None,
+    db_url: Annotated[
+        str | None,
+        typer.Option("--db-url", envvar="SOLGREEN_DATABASE_URL"),
+    ] = None,
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", help="Machine-readable JSON output."),
+    ] = False,
+) -> None:
+    """Run SOLARMAN API operational diagnostics without persisting data."""
+    import json
+
+    from solgreen.integrations.solarman.doctor import run_doctor
+    from solgreen.integrations.solarman.settings import build_settings_from_env
+
+    try:
+        settings = build_settings_from_env()
+    except Exception as exc:
+        if json_output:
+            typer.echo(json.dumps({"ok": False, "error": f"Configuration error: {exc}"}))
+        else:
+            typer.echo(f"[FAIL] Configuration error: {exc}", err=True)
+        raise typer.Exit(code=1) from None
+
+    try:
+        result = run_doctor(settings=settings, station_id=station_id, db_url=db_url)
+    except Exception as exc:
+        if json_output:
+            typer.echo(json.dumps({"ok": False, "error": f"Doctor check failed: {exc}"}))
+        else:
+            typer.echo(f"[FAIL] Doctor check failed: {exc}", err=True)
+        raise typer.Exit(code=1) from None
+
+    if json_output:
+        output = {"ok": True, **result.to_dict()}
+        typer.echo(json.dumps(output, indent=2))
+    else:
+        summary = result.to_dict()["summary"]
+        typer.echo(f"\nSOLARMAN Doctor — {summary['total']} checks, {summary['pass']} PASS, {summary['warn']} WARN, {summary['fail']} FAIL\n")
+        for check in result.checks:
+            icon = {"PASS": "✓", "WARN": "⚠", "FAIL": "✗"}[check.status.value]
+            typer.echo(f"  {icon} [{check.status.value}] {check.name}")
+            if check.detail:
+                typer.echo(f"      {check.detail}")
+        typer.echo()
+        if not result.ready:
+            typer.echo("NOT READY — fix failures before syncing.", err=True)
+            raise typer.Exit(code=1)
+
+
 @solarman_app.command("sync")
 def solarman_sync(
     plant_id: Annotated[
@@ -636,7 +842,18 @@ def solarman_sync(
             help="ISO 8601 cutover timestamp for d10 mode.",
         ),
     ] = None,
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", help="Machine-readable JSON output."),
+    ] = False,
+    dry_run: Annotated[
+        bool,
+        typer.Option("--dry-run", help="Validate and show plan without syncing."),
+    ] = False,
 ) -> None:
+    import json
+
+    from solgreen.db.advisory_lock import LockStatus, acquire_sync_lock
     from solgreen.db.connection import get_connection
     from solgreen.integrations.solarman.client import SolarmanClient
     from solgreen.integrations.solarman.settings import build_settings_from_env
@@ -651,9 +868,41 @@ def solarman_sync(
         plant_id=plant_id,
     )
 
+    if dry_run:
+        if json_output:
+            typer.echo(json.dumps({
+                "ok": True,
+                "dry_run": True,
+                "station_id": station_id,
+                "plant_id": plant_id,
+                "would_sync": True,
+                "message": "Dry-run: would sync station if lock acquired and API responds.",
+            }))
+        else:
+            typer.echo(f"[DRY-RUN] Station: {station_id}")
+            typer.echo(f"[DRY-RUN] Plant: {plant_id}")
+            typer.echo("[DRY-RUN] Would attempt sync if lock acquired and API responds.")
+        return
+
     conn = None
+    lock = None
     if db_url and not no_db:
         conn = get_connection(db_url)
+        if station_id:
+            lock, lock_status = acquire_sync_lock(conn, plant_id, station_id)
+            if lock_status != LockStatus.ACQUIRED:
+                if json_output:
+                    typer.echo(json.dumps({
+                        "ok": False,
+                        "skipped_locked": True,
+                        "station_id": station_id,
+                        "plant_id": plant_id,
+                    }))
+                else:
+                    typer.echo("[SKIPPED_LOCKED] Another sync is running for this station.", err=True)
+                if conn:
+                    conn.close()
+                raise typer.Exit(code=2)
 
     try:
         result = sync_solarman_station(
@@ -664,21 +913,41 @@ def solarman_sync(
             conn=conn,
         )
     finally:
+        if lock is not None:
+            lock.release()
         if conn is not None:
             conn.close()
 
-    typer.echo(f"Station: {result.station_id}")
-    typer.echo(f"Devices queried: {result.devices_queried}")
-    typer.echo(f"Snapshots inserted: {result.snapshots_inserted}")
-    typer.echo(f"Snapshots skipped (already synced): {result.snapshots_skipped}")
-    if result.normalized_count:
-        typer.echo(f"Normalized signals: {result.normalized_count}")
-        typer.echo(f"Not confirmed: {result.not_confirmed_count}")
-        typer.echo(f"Not found: {result.not_found_count}")
-    if result.errors:
-        typer.echo(f"Errors: {len(result.errors)}")
-        for err in result.errors[:5]:
-            typer.echo(f"  - {err}")
+    if json_output:
+        output = {
+            "ok": result.devices_queried > 0 and result.devices_succeeded > 0,
+            "station_id": result.station_id,
+            "plant_id": result.plant_id,
+            "devices_queried": result.devices_queried,
+            "devices_succeeded": result.devices_succeeded,
+            "snapshots_inserted": result.snapshots_inserted,
+            "snapshots_skipped": result.snapshots_skipped,
+        }
+        if result.normalized_count:
+            output["normalized_count"] = result.normalized_count
+            output["not_confirmed_count"] = result.not_confirmed_count
+            output["not_found_count"] = result.not_found_count
+        if result.errors:
+            output["errors"] = result.errors[:10]
+        typer.echo(json.dumps(output))
+    else:
+        typer.echo(f"Station: {result.station_id}")
+        typer.echo(f"Devices queried: {result.devices_queried}")
+        typer.echo(f"Snapshots inserted: {result.snapshots_inserted}")
+        typer.echo(f"Snapshots skipped (already synced): {result.snapshots_skipped}")
+        if result.normalized_count:
+            typer.echo(f"Normalized signals: {result.normalized_count}")
+            typer.echo(f"Not confirmed: {result.not_confirmed_count}")
+            typer.echo(f"Not found: {result.not_found_count}")
+        if result.errors:
+            typer.echo(f"Errors: {len(result.errors)}")
+            for err in result.errors[:5]:
+                typer.echo(f"  - {err}")
 
     if result.devices_queried == 0:
         raise typer.Exit(code=1)

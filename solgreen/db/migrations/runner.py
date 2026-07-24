@@ -1,0 +1,165 @@
+"""Database migration runner with idempotent, checksum-verified execution."""
+
+from __future__ import annotations
+
+import hashlib
+import re
+from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
+from typing import Any
+
+MIGRATION_PATTERN = re.compile(r"^(\d{3,})_(.+)\.sql$")
+
+
+@dataclass(frozen=True)
+class MigrationFile:
+    name: str
+    path: Path
+    version: int
+
+    @property
+    def checksum(self) -> str:
+        content = self.path.read_text(encoding="utf-8")
+        return hashlib.sha256(content.encode()).hexdigest()
+
+
+@dataclass(frozen=True)
+class AppliedMigration:
+    version: int
+    name: str
+    checksum: str
+    applied_at: datetime
+
+
+class DuplicateVersionError(RuntimeError):
+    pass
+
+
+class MigrationRunner:
+    """Idempotent migration runner with checksum verification and rollback on error."""
+
+    def __init__(self, conn: Any) -> None:
+        self._conn = conn
+
+    def _ensure_control_table(self) -> None:
+        with self._conn.cursor() as cur:
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS schema_migrations (
+                    version INTEGER PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    checksum TEXT NOT NULL,
+                    applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+                """
+            )
+        self._conn.commit()
+
+    def _get_applied(self) -> dict[int, AppliedMigration]:
+        self._ensure_control_table()
+        with self._conn.cursor() as cur:
+            cur.execute(
+                "SELECT version, name, checksum, applied_at FROM schema_migrations ORDER BY version"
+            )
+            rows = cur.fetchall()
+        return {
+            row[0]: AppliedMigration(
+                version=row[0], name=row[1], checksum=row[2], applied_at=row[3]
+            )
+            for row in rows
+        }
+
+    def _parse_migration_file(self, f: Path) -> MigrationFile | None:
+        name = f.stem
+        match = MIGRATION_PATTERN.match(name)
+        if not match:
+            return None
+        version_str, _ = match.groups()
+        version = int(version_str)
+        return MigrationFile(name=name, path=f, version=version)
+
+    def _scan_migrations(self, migrations_path: Path) -> list[MigrationFile]:
+        migrations: list[MigrationFile] = []
+        seen_versions: set[int] = set()
+        for f in sorted(migrations_path.glob("*.sql")):
+            mf = self._parse_migration_file(f)
+            if mf is None:
+                continue
+            if mf.version in seen_versions:
+                raise DuplicateVersionError(
+                    f"Duplicate migration version {mf.version} found in {f.name}"
+                )
+            seen_versions.add(mf.version)
+            migrations.append(mf)
+        return migrations
+
+    def _get_pending(self, migrations_path: Path) -> list[MigrationFile]:
+        applied = self._get_applied()
+        all_migrations = self._scan_migrations(migrations_path)
+        return [m for m in all_migrations if m.version not in applied]
+
+    def status(
+        self, migrations_path: Path | None = None
+    ) -> tuple[list[AppliedMigration], list[MigrationFile]]:
+        if migrations_path is None:
+            migrations_path = Path(__file__).parent / "migrations"
+        applied = list(self._get_applied().values())
+        pending = self._get_pending(migrations_path)
+        return applied, pending
+
+    def apply(
+        self, migrations_path: Path | None = None, target_version: int | None = None
+    ) -> list[MigrationFile]:
+        if migrations_path is None:
+            migrations_path = Path(__file__).parent / "migrations"
+        self._ensure_control_table()
+        applied_map = self._get_applied()
+        all_migrations = self._scan_migrations(migrations_path)
+
+        for m in all_migrations:
+            if m.version in applied_map:
+                existing = applied_map[m.version]
+                if m.version != existing.version or m.checksum != existing.checksum:
+                    raise RuntimeError(
+                        f"Migration {m.version} ({m.name}) checksum mismatch. "
+                        f"File: {m.checksum[:16]}..., DB: {existing.checksum[:16]}..."
+                    )
+                if m.name != existing.name:
+                    raise RuntimeError(
+                        f"Migration {m.version} name mismatch. File: {m.name}, DB: {existing.name}"
+                    )
+
+        pending = [m for m in all_migrations if m.version not in applied_map]
+        if target_version is not None:
+            pending = [m for m in pending if m.version <= target_version]
+
+        applied: list[MigrationFile] = []
+        for migration in pending:
+            sql = migration.path.read_text(encoding="utf-8")
+            try:
+                with self._conn.cursor() as cur:
+                    cur.execute(sql)
+                with self._conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT id FROM schema_migrations WHERE version = %s",
+                        (migration.version,),
+                    )
+                    existing = cur.fetchone()
+                    if existing is None:
+                        cur.execute(
+                            "INSERT INTO schema_migrations (version, name, checksum) VALUES (%s, %s, %s)",
+                            (migration.version, migration.name, migration.checksum),
+                        )
+                self._conn.commit()
+                applied.append(migration)
+            except Exception:
+                self._conn.rollback()
+                raise
+
+        return applied
+
+
+def get_migration_runner(conn: Any) -> MigrationRunner:
+    """Create a migration runner for the given database connection."""
+    return MigrationRunner(conn)
