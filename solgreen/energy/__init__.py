@@ -16,6 +16,7 @@ from solgreen.energy.evidence import (
 from solgreen.energy.integration import (
     DirectionalPowerObservation,
     EnergyInterval,
+    EnergySeriesIdentity,
     EnergySummary,
     IntegrationMethod,
     IntegrationProfile,
@@ -55,6 +56,7 @@ __all__ = [
     "DirectionalPowerObservation",
     "DirectionalPowerResult",
     "EnergyInterval",
+    "EnergySeriesIdentity",
     "EnergySummary",
     "IntegrationMethod",
     "IntegrationProfile",

@@ -7,7 +7,7 @@ from enum import StrEnum
 import pydantic
 from pydantic import BaseModel, ConfigDict, Field
 
-from solgreen.energy.normalization import DirectionalPowerResult, NormalizationStatus
+from solgreen.energy.normalization import NormalizationStatus
 from solgreen.energy.sign_profiles import (
     CanonicalPowerField,
     PowerDirection,
@@ -92,22 +92,6 @@ class IntervalStatus(StrEnum):
     NOT_APPLICABLE = "not_applicable"
 
 
-def _power_or_none(result: DirectionalPowerResult, direction: PowerDirection) -> float | None:
-    if direction is PowerDirection.GRID_IMPORT:
-        return result.grid_import_w
-    if direction is PowerDirection.GRID_EXPORT:
-        return result.grid_export_w
-    if direction is PowerDirection.BATTERY_CHARGE:
-        return result.battery_charge_w
-    if direction is PowerDirection.BATTERY_DISCHARGE:
-        return result.battery_discharge_w
-    if direction is PowerDirection.PV_GENERATION:
-        return result.pv_generation_w
-    if direction is PowerDirection.LOAD_CONSUMPTION:
-        return result.load_consumption_w
-    return None
-
-
 class DirectionalPowerObservation(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -119,27 +103,6 @@ class DirectionalPowerObservation(BaseModel):
     status: NormalizationStatus
     profile_version: str | None = None
     lineage: tuple[str, ...] = Field(default=())
-
-    @classmethod
-    def from_normalized(
-        cls,
-        result: DirectionalPowerResult,
-        direction: PowerDirection,
-        *,
-        lineage_prefix: tuple[str, ...] = (),
-    ) -> DirectionalPowerObservation:
-        power = _power_or_none(result, direction)
-        lineage = (*lineage_prefix, f"normalize:{result.status.value}")
-        return cls(
-            timestamp=result.timestamp if hasattr(result, "timestamp") else _UNSET,
-            canonical_source=result.canonical_field,
-            source_system=result.source_system,
-            direction=direction,
-            power_w=power,
-            status=result.status,
-            profile_version=result.profile_version,
-            lineage=lineage,
-        )
 
     @pydantic.model_validator(mode="after")
     def _validate_timestamp_aware(self) -> DirectionalPowerObservation:
@@ -177,7 +140,22 @@ class DirectionalPowerObservation(BaseModel):
         return self
 
 
-_UNSET: datetime = datetime(2000, 1, 1, tzinfo=datetime.now().astimezone().tzinfo)
+class EnergySeriesIdentity(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    source_field: CanonicalPowerField
+    source_system: SourceSystem
+    direction: PowerDirection
+
+    @pydantic.model_validator(mode="after")
+    def _validate_direction(self) -> EnergySeriesIdentity:
+        if self.direction not in _VALID_INTEGRATION_DIRECTIONS:
+            raise ValueError(
+                f"direction must be one of "
+                f"{sorted(d.value for d in _VALID_INTEGRATION_DIRECTIONS)}; "
+                f"got {self.direction.value}."
+            )
+        return self
 
 
 class EnergyInterval(BaseModel):
@@ -274,7 +252,93 @@ class EnergySummary(BaseModel):
     warnings: tuple[str, ...] = Field(default=())
 
     @pydantic.model_validator(mode="after")
-    def _validate_kwh_conversion(self) -> EnergySummary:
+    def _01_validate_period_timestamps(self) -> EnergySummary:
+        if not is_timezone_aware(self.period_start):
+            raise ValueError("period_start must be timezone-aware.")
+        if not is_timezone_aware(self.period_end):
+            raise ValueError("period_end must be timezone-aware.")
+        if self.period_end <= self.period_start:
+            raise ValueError(
+                f"period_end ({self.period_end}) must be > period_start ({self.period_start})."
+            )
+        return self
+
+    @pydantic.model_validator(mode="after")
+    def _02_validate_expected_duration(self) -> EnergySummary:
+        if self.period_end <= self.period_start:
+            return self
+        expected = self.period_end - self.period_start
+        if expected != self.expected_duration:
+            raise ValueError(
+                f"expected_duration ({self.expected_duration}) must equal "
+                f"period_end - period_start ({expected})."
+            )
+        if self.expected_duration <= timedelta(0):
+            raise ValueError(
+                f"expected_duration must be strictly positive; got {self.expected_duration}."
+            )
+        return self
+
+    @pydantic.model_validator(mode="after")
+    def _03_validate_duration_invariants(self) -> EnergySummary:
+        if self.observed_duration < timedelta(0):
+            raise ValueError(f"observed_duration must be >= 0; got {self.observed_duration}.")
+        if self.missing_duration < timedelta(0):
+            raise ValueError(f"missing_duration must be >= 0; got {self.missing_duration}.")
+        if self.excluded_duration < timedelta(0):
+            raise ValueError(f"excluded_duration must be >= 0; got {self.excluded_duration}.")
+        total_dur = self.observed_duration + self.missing_duration + self.excluded_duration
+        if total_dur != self.expected_duration:
+            raise ValueError(
+                f"duration partition must reconcile: "
+                f"observed_duration ({self.observed_duration}) + "
+                f"missing_duration ({self.missing_duration}) + "
+                f"excluded_duration ({self.excluded_duration}) = {total_dur} "
+                f"must equal expected_duration ({self.expected_duration})."
+            )
+        return self
+
+    @pydantic.model_validator(mode="after")
+    def _04_validate_counter_invariants(self) -> EnergySummary:
+        if self.interval_count < 0:
+            raise ValueError(f"interval_count must be >= 0; got {self.interval_count}.")
+        if self.observed_interval_count < 0:
+            raise ValueError(
+                f"observed_interval_count must be >= 0; got {self.observed_interval_count}."
+            )
+        if self.excluded_interval_count < 0:
+            raise ValueError(
+                f"excluded_interval_count must be >= 0; got {self.excluded_interval_count}."
+            )
+        if self.observed_interval_count > self.interval_count:
+            raise ValueError(
+                f"observed_interval_count ({self.observed_interval_count}) "
+                f"must be <= interval_count ({self.interval_count})."
+            )
+        if self.excluded_interval_count > self.interval_count:
+            raise ValueError(
+                f"excluded_interval_count ({self.excluded_interval_count}) "
+                f"must be <= interval_count ({self.interval_count})."
+            )
+        if self.observed_interval_count + self.excluded_interval_count != self.interval_count:
+            raise ValueError(
+                f"observed_interval_count ({self.observed_interval_count}) + "
+                f"excluded_interval_count ({self.excluded_interval_count}) = "
+                f"{self.observed_interval_count + self.excluded_interval_count} "
+                f"must equal interval_count ({self.interval_count})."
+            )
+        return self
+
+    @pydantic.model_validator(mode="after")
+    def _05_validate_energy_invariants(self) -> EnergySummary:
+        if not math.isfinite(self.observed_energy_wh) or self.observed_energy_wh < 0:
+            raise ValueError(
+                f"observed_energy_wh must be finite and >= 0; got {self.observed_energy_wh}."
+            )
+        if not math.isfinite(self.observed_energy_kwh) or self.observed_energy_kwh < 0:
+            raise ValueError(
+                f"observed_energy_kwh must be finite and >= 0; got {self.observed_energy_kwh}."
+            )
         expected_kwh = self.observed_energy_wh / 1000.0
         if not math.isclose(self.observed_energy_kwh, expected_kwh, rel_tol=1e-12):
             raise ValueError(
@@ -284,7 +348,11 @@ class EnergySummary(BaseModel):
         return self
 
     @pydantic.model_validator(mode="after")
-    def _validate_coverage_invariant(self) -> EnergySummary:
+    def _06_validate_coverage_invariant(self) -> EnergySummary:
+        if not math.isfinite(self.coverage_fraction):
+            raise ValueError(f"coverage_fraction must be finite; got {self.coverage_fraction}.")
+        if self.coverage_fraction < 0.0 or self.coverage_fraction > 1.0:
+            raise ValueError(f"coverage_fraction must be in [0, 1]; got {self.coverage_fraction}.")
         if self.expected_duration > timedelta(0):
             expected_cov = self.observed_duration / self.expected_duration
         else:
@@ -294,16 +362,6 @@ class EnergySummary(BaseModel):
                 f"coverage_fraction ({self.coverage_fraction}) "
                 f"must equal observed_duration / expected_duration ({expected_cov})."
             )
-        if self.coverage_fraction < 0.0 or self.coverage_fraction > 1.0:
-            raise ValueError(f"coverage_fraction must be in [0, 1]; got {self.coverage_fraction}.")
-        return self
-
-    @pydantic.model_validator(mode="after")
-    def _validate_energy_non_negative(self) -> EnergySummary:
-        if self.observed_energy_wh < 0:
-            raise ValueError("observed_energy_wh must be >= 0.")
-        if self.observed_energy_kwh < 0:
-            raise ValueError("observed_energy_kwh must be >= 0.")
         return self
 
 
@@ -313,43 +371,90 @@ class IntegrationResult(BaseModel):
     intervals: tuple[EnergyInterval, ...]
     summary: EnergySummary
 
+    @pydantic.model_validator(mode="after")
+    def _validate_interval_summary_agreement(self) -> IntegrationResult:
+        summary = self.summary
+        intervals = self.intervals
 
-def _check_homogeneous_series(
+        if summary.interval_count != len(intervals):
+            raise ValueError(
+                f"summary.interval_count ({summary.interval_count}) "
+                f"must equal len(intervals) ({len(intervals)})."
+            )
+
+        actual_observed = sum(1 for iv in intervals if iv.status is IntervalStatus.OBSERVED)
+        if summary.observed_interval_count != actual_observed:
+            raise ValueError(
+                f"summary.observed_interval_count ({summary.observed_interval_count}) "
+                f"must equal actual observed intervals ({actual_observed})."
+            )
+
+        actual_excluded = sum(1 for iv in intervals if iv.status is not IntervalStatus.OBSERVED)
+        if summary.excluded_interval_count != actual_excluded:
+            raise ValueError(
+                f"summary.excluded_interval_count ({summary.excluded_interval_count}) "
+                f"must equal actual non-observed intervals ({actual_excluded})."
+            )
+
+        actual_observed_dur = sum(
+            (iv.duration for iv in intervals if iv.status is IntervalStatus.OBSERVED), timedelta(0)
+        )
+        if actual_observed_dur != summary.observed_duration:
+            raise ValueError(
+                f"sum of observed interval durations ({actual_observed_dur}) "
+                f"must equal summary.observed_duration ({summary.observed_duration})."
+            )
+
+        actual_energy = sum(
+            (
+                iv.energy_wh
+                for iv in intervals
+                if iv.status is IntervalStatus.OBSERVED and iv.energy_wh is not None
+            ),
+            0.0,
+        )
+        if not math.isclose(actual_energy, summary.observed_energy_wh, rel_tol=1e-12):
+            raise ValueError(
+                f"sum of observed interval energies ({actual_energy}) "
+                f"must equal summary.observed_energy_wh ({summary.observed_energy_wh})."
+            )
+
+        return self
+
+
+def _check_series_matches_observations(
+    series: EnergySeriesIdentity,
     observations: list[DirectionalPowerObservation],
 ) -> None:
-    if not observations:
-        return
-    first = observations[0]
     for idx, obs in enumerate(observations):
-        if obs.canonical_source != first.canonical_source:
+        if obs.canonical_source != series.source_field:
             raise ValueError(
-                f"mixed canonical_source in batch: "
-                f"observation 0 has {first.canonical_source.value}, "
-                f"observation {idx} has {obs.canonical_source.value}."
+                f"observation {idx} has canonical_source={obs.canonical_source.value} "
+                f"which does not match series source_field={series.source_field.value}."
             )
-        if obs.source_system != first.source_system:
+        if obs.source_system != series.source_system:
             raise ValueError(
-                f"mixed source_system in batch: "
-                f"observation 0 has {first.source_system.value}, "
-                f"observation {idx} has {obs.source_system.value}."
+                f"observation {idx} has source_system={obs.source_system.value} "
+                f"which does not match series source_system={series.source_system.value}."
             )
-        if obs.direction != first.direction:
+        if obs.direction != series.direction:
             raise ValueError(
-                f"mixed direction in batch: "
-                f"observation 0 has {first.direction.value}, "
-                f"observation {idx} has {obs.direction.value}."
+                f"observation {idx} has direction={obs.direction.value} "
+                f"which does not match series direction={series.direction.value}."
             )
-        if (
-            obs.status is NormalizationStatus.NORMALIZED
-            and obs.profile_version is not None
-            and first.profile_version is not None
-            and obs.profile_version != first.profile_version
-        ):
-            raise ValueError(
-                f"mixed profile_version in batch: "
-                f"observation 0 has '{first.profile_version}', "
-                f"observation {idx} has '{obs.profile_version}'."
-            )
+
+
+def _check_mixed_profile_version(
+    observations: list[DirectionalPowerObservation],
+) -> None:
+    normalized_versions: set[str] = set()
+    for obs in observations:
+        if obs.status is NormalizationStatus.NORMALIZED and obs.profile_version is not None:
+            normalized_versions.add(obs.profile_version)
+
+    if len(normalized_versions) > 1:
+        sorted_versions = sorted(normalized_versions)
+        raise ValueError(f"mixed profile_version in batch: found {sorted_versions}.")
 
 
 def _check_monotonic(
@@ -366,6 +471,7 @@ def _check_monotonic(
 
 def integrate_energy(
     *,
+    series: EnergySeriesIdentity,
     observations: list[DirectionalPowerObservation],
     profile: IntegrationProfile,
     period_start: datetime,
@@ -378,13 +484,10 @@ def integrate_energy(
     if period_end <= period_start:
         raise ValueError("period_end must be > period_start.")
 
-    _check_homogeneous_series(observations)
+    _check_series_matches_observations(series, observations)
+    _check_mixed_profile_version(observations)
     _check_monotonic(observations)
 
-    # Filter observations to those within [period_start, period_end].
-    # Observations strictly outside the period do not participate in
-    # interval creation, but their timestamps are still validated for
-    # monotonicity in the raw input.
     in_window = [o for o in observations if period_start <= o.timestamp <= period_end]
 
     n = len(in_window)
@@ -397,13 +500,9 @@ def integrate_energy(
     excluded_interval_count = 0
     warnings: list[str] = []
 
-    series_source = in_window[0].canonical_source if n > 0 else CanonicalPowerField.FLOW_GRID
-    series_system = in_window[0].source_system if n > 0 else SourceSystem.SOLARMAN_PLANT_FLOW
-    series_direction = in_window[0].direction if n > 0 else PowerDirection.GRID_IMPORT
     sign_profile_version: str | None = None
-
     for obs in in_window:
-        if obs.status is NormalizationStatus.NORMALIZED and obs.profile_version:
+        if obs.status is NormalizationStatus.NORMALIZED and obs.profile_version is not None:
             sign_profile_version = obs.profile_version
             break
 
@@ -413,9 +512,9 @@ def integrate_energy(
             summary=EnergySummary(
                 period_start=period_start,
                 period_end=period_end,
-                source_field=series_source,
-                source_system=series_system,
-                direction=series_direction,
+                source_field=series.source_field,
+                source_system=series.source_system,
+                direction=series.direction,
                 observed_energy_wh=0.0,
                 observed_energy_kwh=0.0,
                 expected_duration=period_end - period_start,
@@ -431,12 +530,10 @@ def integrate_energy(
             ),
         )
 
-    # Account for leading boundary: period_start to first observation
     first_ts = in_window[0].timestamp
     if first_ts > period_start:
         missing_duration += first_ts - period_start
 
-    # Process consecutive pairs within the period window
     max_auth = profile.maximum_authorized_interval
 
     for idx in range(n - 1):
@@ -453,9 +550,9 @@ def integrate_energy(
                     start=start_ts,
                     end=end_ts,
                     duration=duration,
-                    source_field=series_source,
-                    source_system=series_system,
-                    direction=series_direction,
+                    source_field=series.source_field,
+                    source_system=series.source_system,
+                    direction=series.direction,
                     start_power_w=None,
                     end_power_w=None,
                     integration_method=profile.integration_method,
@@ -475,9 +572,9 @@ def integrate_energy(
                     start=start_ts,
                     end=end_ts,
                     duration=duration,
-                    source_field=series_source,
-                    source_system=series_system,
-                    direction=series_direction,
+                    source_field=series.source_field,
+                    source_system=series.source_system,
+                    direction=series.direction,
                     start_power_w=None,
                     end_power_w=None,
                     integration_method=profile.integration_method,
@@ -532,9 +629,9 @@ def integrate_energy(
                     start=start_ts,
                     end=end_ts,
                     duration=duration,
-                    source_field=series_source,
-                    source_system=series_system,
-                    direction=series_direction,
+                    source_field=series.source_field,
+                    source_system=series.source_system,
+                    direction=series.direction,
                     start_power_w=power_a,
                     end_power_w=power_b,
                     integration_method=profile.integration_method,
@@ -562,9 +659,9 @@ def integrate_energy(
                 start=start_ts,
                 end=end_ts,
                 duration=duration,
-                source_field=series_source,
-                source_system=series_system,
-                direction=series_direction,
+                source_field=series.source_field,
+                source_system=series.source_system,
+                direction=series.direction,
                 start_power_w=power_a,
                 end_power_w=power_b,
                 integration_method=profile.integration_method,
@@ -579,7 +676,6 @@ def integrate_energy(
         observed_duration += duration
         observed_interval_count += 1
 
-    # Account for trailing boundary: last observation to period_end
     last_ts = in_window[-1].timestamp
     if last_ts < period_end:
         missing_duration += period_end - last_ts
@@ -603,9 +699,9 @@ def integrate_energy(
         summary=EnergySummary(
             period_start=period_start,
             period_end=period_end,
-            source_field=series_source,
-            source_system=series_system,
-            direction=series_direction,
+            source_field=series.source_field,
+            source_system=series.source_system,
+            direction=series.direction,
             observed_energy_wh=observed_energy_wh,
             observed_energy_kwh=observed_energy_wh / 1000.0,
             expected_duration=expected_duration,

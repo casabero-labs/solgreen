@@ -8,9 +8,11 @@ import pytest
 from solgreen.energy.integration import (
     DirectionalPowerObservation,
     EnergyInterval,
+    EnergySeriesIdentity,
     EnergySummary,
     IntegrationMethod,
     IntegrationProfile,
+    IntegrationResult,
     IntervalStatus,
     SampleSemantics,
     integrate_energy,
@@ -36,7 +38,28 @@ _SOLARMAN = SourceSystem.SOLARMAN_PLANT_FLOW
 _IMPORT = PowerDirection.GRID_IMPORT
 _EXPORT = PowerDirection.GRID_EXPORT
 _LOAD = PowerDirection.LOAD_CONSUMPTION
+_CHARGE = PowerDirection.BATTERY_CHARGE
+_DISCHARGE = PowerDirection.BATTERY_DISCHARGE
+_PV = PowerDirection.PV_GENERATION
 _ZONE = UTC
+
+_SERIES_GRID_IMPORT = EnergySeriesIdentity(
+    source_field=_GRID,
+    source_system=_SOLARMAN,
+    direction=_IMPORT,
+)
+
+_SERIES_GRID_EXPORT = EnergySeriesIdentity(
+    source_field=_GRID,
+    source_system=_SOLARMAN,
+    direction=_EXPORT,
+)
+
+_SERIES_BATTERY_CHARGE = EnergySeriesIdentity(
+    source_field=CanonicalPowerField.FLOW_BATTERY,
+    source_system=_SOLARMAN,
+    direction=_CHARGE,
+)
 
 
 def _obs(
@@ -160,6 +183,15 @@ class TestDirectionalPowerObservationValidation:
                 profile_version=None,
             )
 
+    def test_non_normalized_profile_version_none(self) -> None:
+        obs = _obs(
+            _TS,
+            power_w=None,
+            status=NormalizationStatus.MISSING_VALUE,
+            profile_version=None,
+        )
+        assert obs.profile_version is None
+
     def test_invalid_direction_rejected(self) -> None:
         with pytest.raises(ValueError, match="direction must be one of"):
             DirectionalPowerObservation(
@@ -181,7 +213,6 @@ class TestDirectionalPowerObservationValidation:
             _TS,
             power_w=None,
             status=NormalizationStatus.MISSING_VALUE,
-            profile_version="x",
         )
         assert obs.power_w is None
         assert obs.status is NormalizationStatus.MISSING_VALUE
@@ -247,6 +278,38 @@ class TestIntegrationProfileValidation:
                 expected_interval=_M10,
                 maximum_authorized_interval=_M5,
             )
+
+
+# ---------------------------------------------------------------------------
+# Model validation — EnergySeriesIdentity
+# ---------------------------------------------------------------------------
+
+
+class TestEnergySeriesIdentity:
+    def test_valid_identity_accepted(self) -> None:
+        id_ = EnergySeriesIdentity(
+            source_field=_GRID,
+            source_system=_SOLARMAN,
+            direction=_IMPORT,
+        )
+        assert id_.source_field == _GRID
+
+    def test_invalid_direction_rejected(self) -> None:
+        with pytest.raises(ValueError, match="direction must be one of"):
+            EnergySeriesIdentity(
+                source_field=_GRID,
+                source_system=_SOLARMAN,
+                direction=PowerDirection.UNKNOWN,
+            )
+
+    def test_frozen(self) -> None:
+        id_ = EnergySeriesIdentity(
+            source_field=_GRID,
+            source_system=_SOLARMAN,
+            direction=_IMPORT,
+        )
+        with pytest.raises(pydantic.ValidationError, match="frozen"):
+            id_.direction = _EXPORT  # type: ignore[misc]
 
 
 # ---------------------------------------------------------------------------
@@ -334,7 +397,9 @@ class TestEnergySummaryValidation:
                 observed_energy_wh=0.0,
                 observed_energy_kwh=0.0,
                 expected_duration=_H1,
-                observed_duration=_H2,
+                observed_duration=_H1,
+                missing_duration=timedelta(0),
+                excluded_duration=timedelta(0),
                 coverage_fraction=2.0,
             )
 
@@ -350,6 +415,8 @@ class TestEnergySummaryValidation:
                 observed_energy_kwh=0.0,
                 expected_duration=_H1,
                 observed_duration=_M5,
+                missing_duration=_H1 - _M5,
+                excluded_duration=timedelta(0),
                 coverage_fraction=0.5,
             )
 
@@ -364,8 +431,387 @@ class TestEnergySummaryValidation:
                 observed_energy_wh=-1.0,
                 observed_energy_kwh=-0.001,
                 expected_duration=_H1,
-                coverage_fraction=0.0,
+                observed_duration=_H1,
+                missing_duration=timedelta(0),
+                excluded_duration=timedelta(0),
+                coverage_fraction=1.0,
             )
+
+    def test_naive_period_start_rejected(self) -> None:
+        with pytest.raises(ValueError, match="period_start must be timezone-aware"):
+            EnergySummary(
+                period_start=datetime(2026, 7, 24, 12, 0, 0),
+                period_end=_TS + _H1,
+                source_field=_GRID,
+                source_system=_SOLARMAN,
+                direction=_IMPORT,
+                expected_duration=_H1,
+                observed_duration=timedelta(0),
+                missing_duration=_H1,
+                excluded_duration=timedelta(0),
+            )
+
+    def test_naive_period_end_rejected(self) -> None:
+        with pytest.raises(ValueError, match="period_end must be timezone-aware"):
+            EnergySummary(
+                period_start=_TS,
+                period_end=datetime(2026, 7, 24, 13, 0, 0),
+                source_field=_GRID,
+                source_system=_SOLARMAN,
+                direction=_IMPORT,
+                expected_duration=_H1,
+                observed_duration=timedelta(0),
+                missing_duration=_H1,
+                excluded_duration=timedelta(0),
+            )
+
+    def test_reversed_period_rejected(self) -> None:
+        with pytest.raises(ValueError, match=r"period_end.*must be >.*period_start"):
+            EnergySummary(
+                period_start=_TS + _H1,
+                period_end=_TS,
+                source_field=_GRID,
+                source_system=_SOLARMAN,
+                direction=_IMPORT,
+                expected_duration=timedelta(0),
+                observed_duration=timedelta(0),
+                missing_duration=timedelta(0),
+                excluded_duration=timedelta(0),
+            )
+
+    def test_zero_period_rejected(self) -> None:
+        with pytest.raises(ValueError, match=r"period_end.*must be >.*period_start"):
+            EnergySummary(
+                period_start=_TS,
+                period_end=_TS,
+                source_field=_GRID,
+                source_system=_SOLARMAN,
+                direction=_IMPORT,
+                expected_duration=timedelta(0),
+                observed_duration=timedelta(0),
+                missing_duration=timedelta(0),
+                excluded_duration=timedelta(0),
+            )
+
+    def test_incorrect_expected_duration_rejected(self) -> None:
+        with pytest.raises(
+            ValueError, match=r"expected_duration.*must equal.*period_end.*period_start"
+        ):
+            EnergySummary(
+                period_start=_TS,
+                period_end=_TS + _H1,
+                source_field=_GRID,
+                source_system=_SOLARMAN,
+                direction=_IMPORT,
+                expected_duration=_M5,
+                observed_duration=timedelta(0),
+                missing_duration=timedelta(0),
+                excluded_duration=timedelta(0),
+            )
+
+    def test_negative_observed_duration_rejected(self) -> None:
+        with pytest.raises(ValueError, match="observed_duration must be >= 0"):
+            EnergySummary(
+                period_start=_TS,
+                period_end=_TS + _H1,
+                source_field=_GRID,
+                source_system=_SOLARMAN,
+                direction=_IMPORT,
+                expected_duration=_H1,
+                observed_duration=timedelta(seconds=-1),
+                missing_duration=_H1,
+                excluded_duration=timedelta(0),
+            )
+
+    def test_negative_missing_duration_rejected(self) -> None:
+        with pytest.raises(ValueError, match="missing_duration must be >= 0"):
+            EnergySummary(
+                period_start=_TS,
+                period_end=_TS + _H1,
+                source_field=_GRID,
+                source_system=_SOLARMAN,
+                direction=_IMPORT,
+                expected_duration=_H1,
+                observed_duration=timedelta(0),
+                missing_duration=timedelta(seconds=-1),
+                excluded_duration=_H1,
+            )
+
+    def test_negative_excluded_duration_rejected(self) -> None:
+        with pytest.raises(ValueError, match="excluded_duration must be >= 0"):
+            EnergySummary(
+                period_start=_TS,
+                period_end=_TS + _H1,
+                source_field=_GRID,
+                source_system=_SOLARMAN,
+                direction=_IMPORT,
+                expected_duration=_H1,
+                observed_duration=timedelta(0),
+                missing_duration=_H1,
+                excluded_duration=timedelta(seconds=-1),
+            )
+
+    def test_duration_partition_mismatch_rejected(self) -> None:
+        with pytest.raises(ValueError, match="duration partition must reconcile"):
+            EnergySummary(
+                period_start=_TS,
+                period_end=_TS + _H1,
+                source_field=_GRID,
+                source_system=_SOLARMAN,
+                direction=_IMPORT,
+                expected_duration=_H1,
+                observed_duration=timedelta(minutes=30),
+                missing_duration=timedelta(minutes=10),
+                excluded_duration=timedelta(minutes=10),
+            )
+
+    def test_negative_interval_count_rejected(self) -> None:
+        with pytest.raises(ValueError, match="interval_count must be >= 0"):
+            EnergySummary(
+                period_start=_TS,
+                period_end=_TS + _H1,
+                source_field=_GRID,
+                source_system=_SOLARMAN,
+                direction=_IMPORT,
+                expected_duration=_H1,
+                observed_duration=timedelta(0),
+                missing_duration=_H1,
+                excluded_duration=timedelta(0),
+                interval_count=-1,
+            )
+
+    def test_negative_observed_interval_count_rejected(self) -> None:
+        with pytest.raises(ValueError, match="observed_interval_count must be >= 0"):
+            EnergySummary(
+                period_start=_TS,
+                period_end=_TS + _H1,
+                source_field=_GRID,
+                source_system=_SOLARMAN,
+                direction=_IMPORT,
+                expected_duration=_H1,
+                observed_duration=timedelta(0),
+                missing_duration=_H1,
+                excluded_duration=timedelta(0),
+                interval_count=1,
+                observed_interval_count=-1,
+            )
+
+    def test_negative_excluded_interval_count_rejected(self) -> None:
+        with pytest.raises(ValueError, match="excluded_interval_count must be >= 0"):
+            EnergySummary(
+                period_start=_TS,
+                period_end=_TS + _H1,
+                source_field=_GRID,
+                source_system=_SOLARMAN,
+                direction=_IMPORT,
+                expected_duration=_H1,
+                observed_duration=timedelta(0),
+                missing_duration=_H1,
+                excluded_duration=timedelta(0),
+                interval_count=1,
+                excluded_interval_count=-1,
+            )
+
+    def test_observed_count_exceeds_interval_count_rejected(self) -> None:
+        with pytest.raises(ValueError, match=r"observed_interval_count.*must be <= interval_count"):
+            EnergySummary(
+                period_start=_TS,
+                period_end=_TS + _H1,
+                source_field=_GRID,
+                source_system=_SOLARMAN,
+                direction=_IMPORT,
+                expected_duration=_H1,
+                observed_duration=timedelta(0),
+                missing_duration=_H1,
+                excluded_duration=timedelta(0),
+                interval_count=1,
+                observed_interval_count=2,
+            )
+
+    def test_excluded_count_exceeds_interval_count_rejected(self) -> None:
+        with pytest.raises(ValueError, match=r"excluded_interval_count.*must be <= interval_count"):
+            EnergySummary(
+                period_start=_TS,
+                period_end=_TS + _H1,
+                source_field=_GRID,
+                source_system=_SOLARMAN,
+                direction=_IMPORT,
+                expected_duration=_H1,
+                observed_duration=timedelta(0),
+                missing_duration=_H1,
+                excluded_duration=timedelta(0),
+                interval_count=1,
+                excluded_interval_count=2,
+            )
+
+    def test_counter_reconciliation_mismatch_rejected(self) -> None:
+        with pytest.raises(ValueError, match=r"observed_interval_count.*must equal interval_count"):
+            EnergySummary(
+                period_start=_TS,
+                period_end=_TS + _H1,
+                source_field=_GRID,
+                source_system=_SOLARMAN,
+                direction=_IMPORT,
+                expected_duration=_H1,
+                observed_duration=timedelta(0),
+                missing_duration=_H1,
+                excluded_duration=timedelta(0),
+                interval_count=5,
+                observed_interval_count=2,
+                excluded_interval_count=2,
+            )
+
+    def test_nan_energy_rejected(self) -> None:
+        with pytest.raises(ValueError, match="observed_energy_wh must be finite"):
+            EnergySummary(
+                period_start=_TS,
+                period_end=_TS + _H1,
+                source_field=_GRID,
+                source_system=_SOLARMAN,
+                direction=_IMPORT,
+                observed_energy_wh=float("nan"),
+                observed_energy_kwh=float("nan"),
+                expected_duration=_H1,
+                observed_duration=timedelta(0),
+                missing_duration=_H1,
+                excluded_duration=timedelta(0),
+            )
+
+    def test_inf_energy_rejected(self) -> None:
+        with pytest.raises(ValueError, match="observed_energy_wh must be finite"):
+            EnergySummary(
+                period_start=_TS,
+                period_end=_TS + _H1,
+                source_field=_GRID,
+                source_system=_SOLARMAN,
+                direction=_IMPORT,
+                observed_energy_wh=float("inf"),
+                observed_energy_kwh=float("inf"),
+                expected_duration=_H1,
+                observed_duration=timedelta(0),
+                missing_duration=_H1,
+                excluded_duration=timedelta(0),
+            )
+
+    def test_nan_coverage_rejected(self) -> None:
+        with pytest.raises(ValueError, match="coverage_fraction must be finite"):
+            EnergySummary(
+                period_start=_TS,
+                period_end=_TS + _H1,
+                source_field=_GRID,
+                source_system=_SOLARMAN,
+                direction=_IMPORT,
+                expected_duration=_H1,
+                observed_duration=timedelta(0),
+                missing_duration=_H1,
+                excluded_duration=timedelta(0),
+                coverage_fraction=float("nan"),
+            )
+
+
+# ---------------------------------------------------------------------------
+# Model validation — IntegrationResult
+# ---------------------------------------------------------------------------
+
+
+class TestIntegrationResultValidation:
+    def test_wrong_interval_count_rejected(self) -> None:
+        summary = EnergySummary(
+            period_start=_TS,
+            period_end=_TS + _H1,
+            source_field=_GRID,
+            source_system=_SOLARMAN,
+            direction=_IMPORT,
+            expected_duration=_H1,
+            observed_duration=timedelta(0),
+            missing_duration=timedelta(0),
+            excluded_duration=_H1,
+            coverage_fraction=0.0,
+            interval_count=5,
+            observed_interval_count=0,
+            excluded_interval_count=5,
+        )
+        interval = EnergyInterval(
+            start=_TS,
+            end=_TS + _H1,
+            duration=_H1,
+            source_field=_GRID,
+            source_system=_SOLARMAN,
+            direction=_IMPORT,
+            integration_method=IntegrationMethod.TRAPEZOIDAL,
+            energy_wh=None,
+            status=IntervalStatus.MISSING,
+        )
+        with pytest.raises(ValueError, match=r"interval_count.*must equal len"):
+            IntegrationResult(intervals=(interval,), summary=summary)
+
+    def test_wrong_observed_count_rejected(self) -> None:
+        summary = EnergySummary(
+            period_start=_TS,
+            period_end=_TS + _H1,
+            source_field=_GRID,
+            source_system=_SOLARMAN,
+            direction=_IMPORT,
+            expected_duration=_H1,
+            observed_duration=timedelta(0),
+            missing_duration=timedelta(0),
+            excluded_duration=_H1,
+            coverage_fraction=0.0,
+            interval_count=1,
+            observed_interval_count=0,
+            excluded_interval_count=1,
+        )
+        interval = EnergyInterval(
+            start=_TS,
+            end=_TS + _H1,
+            duration=_H1,
+            source_field=_GRID,
+            source_system=_SOLARMAN,
+            direction=_IMPORT,
+            start_power_w=100.0,
+            end_power_w=100.0,
+            integration_method=IntegrationMethod.TRAPEZOIDAL,
+            energy_wh=100.0,
+            status=IntervalStatus.OBSERVED,
+            sign_profile_version="1.0.0",
+        )
+        with pytest.raises(ValueError, match=r"observed_interval_count.*must equal actual"):
+            IntegrationResult(intervals=(interval,), summary=summary)
+
+    def test_wrong_energy_total_rejected(self) -> None:
+        summary = EnergySummary(
+            period_start=_TS,
+            period_end=_TS + _H1,
+            source_field=_GRID,
+            source_system=_SOLARMAN,
+            direction=_IMPORT,
+            expected_duration=_H1,
+            observed_duration=_H1,
+            missing_duration=timedelta(0),
+            excluded_duration=timedelta(0),
+            coverage_fraction=1.0,
+            observed_energy_wh=999.0,
+            observed_energy_kwh=0.999,
+            interval_count=1,
+            observed_interval_count=1,
+            excluded_interval_count=0,
+        )
+        interval = EnergyInterval(
+            start=_TS,
+            end=_TS + _H1,
+            duration=_H1,
+            source_field=_GRID,
+            source_system=_SOLARMAN,
+            direction=_IMPORT,
+            start_power_w=100.0,
+            end_power_w=100.0,
+            integration_method=IntegrationMethod.TRAPEZOIDAL,
+            energy_wh=100.0,
+            status=IntervalStatus.OBSERVED,
+            sign_profile_version="1.0.0",
+        )
+        with pytest.raises(ValueError, match=r"sum of observed interval energies.*must equal"):
+            IntegrationResult(intervals=(interval,), summary=summary)
 
 
 # ---------------------------------------------------------------------------
@@ -380,6 +826,7 @@ class TestIntegrationHappyPath:
             _obs(_TS + _H1, 1000.0),
         ]
         result = integrate_energy(
+            series=_SERIES_GRID_IMPORT,
             observations=obs,
             profile=_P,
             period_start=_TS,
@@ -399,6 +846,7 @@ class TestIntegrationHappyPath:
             _obs(_TS + _H1, 1000.0),
         ]
         result = integrate_energy(
+            series=_SERIES_GRID_IMPORT,
             observations=obs,
             profile=_P,
             period_start=_TS,
@@ -414,6 +862,7 @@ class TestIntegrationHappyPath:
             _obs(_TS + _H1, 0.0),
         ]
         result = integrate_energy(
+            series=_SERIES_GRID_IMPORT,
             observations=obs,
             profile=_P,
             period_start=_TS,
@@ -433,6 +882,7 @@ class TestIntegrationHappyPath:
         duration_h = 6.0 / 60.0
         expected = ((100.0 + 300.0) / 2.0) * duration_h
         result = integrate_energy(
+            series=_SERIES_GRID_IMPORT,
             observations=obs,
             profile=p,
             period_start=_TS,
@@ -447,6 +897,7 @@ class TestIntegrationHappyPath:
             _obs(_TS + _H2, 500.0),
         ]
         result = integrate_energy(
+            series=_SERIES_GRID_IMPORT,
             observations=obs,
             profile=_P,
             period_start=_TS,
@@ -461,6 +912,7 @@ class TestIntegrationHappyPath:
             _obs(_TS + _H1, 100.0),
         ]
         result = integrate_energy(
+            series=_SERIES_GRID_IMPORT,
             observations=obs,
             profile=_P,
             period_start=_TS,
@@ -475,6 +927,7 @@ class TestIntegrationHappyPath:
             _obs(_TS + _H1, 100.0),
         ]
         result = integrate_energy(
+            series=_SERIES_GRID_IMPORT,
             observations=obs,
             profile=_P,
             period_start=_TS,
@@ -502,6 +955,7 @@ class TestGapPolicy:
             _obs(_TS + _M10, 200.0),
         ]
         result = integrate_energy(
+            series=_SERIES_GRID_IMPORT,
             observations=obs,
             profile=p,
             period_start=_TS,
@@ -518,6 +972,7 @@ class TestGapPolicy:
             _obs(_TS + _M10, 200.0),
         ]
         result = integrate_energy(
+            series=_SERIES_GRID_IMPORT,
             observations=obs,
             profile=_P,
             period_start=_TS,
@@ -532,6 +987,7 @@ class TestGapPolicy:
             _obs(_TS + _M5, 200.0),
         ]
         result = integrate_energy(
+            series=_SERIES_GRID_IMPORT,
             observations=obs,
             profile=_P,
             period_start=_TS,
@@ -549,13 +1005,12 @@ class TestGapPolicy:
             _obs(_TS + _H2, 999.0),
         ]
         result = integrate_energy(
+            series=_SERIES_GRID_IMPORT,
             observations=obs,
             profile=p,
             period_start=_TS,
             period_end=_TS + _M5,
         )
-        # obs[0] (< _TS) and obs[3] (> period_end) are filtered out.
-        # Only obs[1] and obs[2] participate — one pair.
         assert len(result.intervals) == 1
         assert result.intervals[0].status is IntervalStatus.OBSERVED
 
@@ -568,6 +1023,7 @@ class TestGapPolicy:
 class TestEdgeCases:
     def test_empty_input_produces_zero_energy_zero_coverage(self) -> None:
         result = integrate_energy(
+            series=_SERIES_GRID_IMPORT,
             observations=[],
             profile=_P,
             period_start=_TS,
@@ -582,8 +1038,47 @@ class TestEdgeCases:
         assert len(result.intervals) == 0
         assert "empty_series" in result.summary.warnings
 
+    def test_empty_grid_import_series_preserves_identity(self) -> None:
+        result = integrate_energy(
+            series=_SERIES_GRID_IMPORT,
+            observations=[],
+            profile=_P,
+            period_start=_TS,
+            period_end=_TS + _H1,
+        )
+        assert result.summary.source_field == _GRID
+        assert result.summary.source_system == _SOLARMAN
+        assert result.summary.direction == _IMPORT
+
+    def test_empty_battery_charge_series_preserves_identity(self) -> None:
+        result = integrate_energy(
+            series=_SERIES_BATTERY_CHARGE,
+            observations=[],
+            profile=_P,
+            period_start=_TS,
+            period_end=_TS + _H1,
+        )
+        assert result.summary.source_field == CanonicalPowerField.FLOW_BATTERY
+        assert result.summary.direction == _CHARGE
+
+    def test_observations_outside_window_preserve_identity(self) -> None:
+        obs = [
+            _obs(_TS - _H1, 100.0),
+            _obs(_TS - _H1 + _M5, 100.0),
+        ]
+        result = integrate_energy(
+            series=_SERIES_GRID_IMPORT,
+            observations=obs,
+            profile=_P,
+            period_start=_TS,
+            period_end=_TS + _H1,
+        )
+        assert result.summary.source_field == _GRID
+        assert result.summary.direction == _IMPORT
+
     def test_single_observation_produces_zero_energy_zero_coverage(self) -> None:
         result = integrate_energy(
+            series=_SERIES_GRID_IMPORT,
             observations=[_obs(_TS, 500.0)],
             profile=_P,
             period_start=_TS,
@@ -602,6 +1097,7 @@ class TestEdgeCases:
             _obs(_TS + _H1, 300.0),
         ]
         result = integrate_energy(
+            series=_SERIES_GRID_IMPORT,
             observations=obs,
             profile=_P,
             period_start=_TS,
@@ -620,6 +1116,7 @@ class TestEdgeCases:
         ]
         with pytest.raises(ValueError, match="out-of-order"):
             integrate_energy(
+                series=_SERIES_GRID_IMPORT,
                 observations=obs,
                 profile=_P,
                 period_start=_TS,
@@ -632,6 +1129,7 @@ class TestEdgeCases:
             _obs(_TS + _M5, 1000.0),
         ]
         result = integrate_energy(
+            series=_SERIES_GRID_IMPORT,
             observations=obs,
             profile=_P,
             period_start=_TS,
@@ -654,10 +1152,10 @@ class TestExcludedIntervals:
                 _TS + _M5,
                 power_w=None,
                 status=NormalizationStatus.MISSING_VALUE,
-                profile_version="x",
             ),
         ]
         result = integrate_energy(
+            series=_SERIES_GRID_IMPORT,
             observations=obs,
             profile=_P,
             period_start=_TS,
@@ -678,6 +1176,7 @@ class TestExcludedIntervals:
             ),
         ]
         result = integrate_energy(
+            series=_SERIES_GRID_IMPORT,
             observations=obs,
             profile=_P,
             period_start=_TS,
@@ -691,16 +1190,15 @@ class TestExcludedIntervals:
                 _TS,
                 power_w=None,
                 status=NormalizationStatus.NONFINITE_VALUE,
-                profile_version="x",
             ),
             _obs(
                 _TS + _M5,
                 power_w=None,
                 status=NormalizationStatus.NONFINITE_VALUE,
-                profile_version="x",
             ),
         ]
         result = integrate_energy(
+            series=_SERIES_GRID_IMPORT,
             observations=obs,
             profile=_P,
             period_start=_TS,
@@ -710,62 +1208,151 @@ class TestExcludedIntervals:
 
 
 # ---------------------------------------------------------------------------
-# Homogeneous-series invariant
+# Series identity validation
 # ---------------------------------------------------------------------------
 
 
-class TestHomogeneousSeries:
-    def test_mixed_source_field_rejected(self) -> None:
+class TestSeriesIdentityValidation:
+    def test_source_field_mismatch_raises(self) -> None:
         obs = [
-            _obs(_TS, 100.0, source=_GRID),
-            _obs(_TS + _M5, 100.0, source=CanonicalPowerField.FLOW_BATTERY),
+            _obs(_TS, 100.0, source=CanonicalPowerField.FLOW_BATTERY),
+            _obs(_TS + _H1, 100.0, source=CanonicalPowerField.FLOW_BATTERY),
         ]
-        with pytest.raises(ValueError, match="mixed canonical_source"):
+        with pytest.raises(ValueError, match=r"canonical_source.*does not match series"):
             integrate_energy(
+                series=_SERIES_GRID_IMPORT,
                 observations=obs,
                 profile=_P,
                 period_start=_TS,
-                period_end=_TS + _M5,
+                period_end=_TS + _H1,
             )
 
-    def test_mixed_source_system_rejected(self) -> None:
+    def test_source_system_mismatch_raises(self) -> None:
         obs = [
-            _obs(_TS, 100.0, system=_SOLARMAN),
-            _obs(_TS + _M5, 100.0, system=SourceSystem.INVERTER_TELEMETRY),
+            _obs(_TS, 100.0, system=SourceSystem.INVERTER_TELEMETRY),
+            _obs(_TS + _H1, 100.0, system=SourceSystem.INVERTER_TELEMETRY),
         ]
-        with pytest.raises(ValueError, match="mixed source_system"):
+        with pytest.raises(ValueError, match=r"source_system.*does not match series"):
             integrate_energy(
+                series=_SERIES_GRID_IMPORT,
                 observations=obs,
                 profile=_P,
                 period_start=_TS,
-                period_end=_TS + _M5,
+                period_end=_TS + _H1,
             )
 
-    def test_mixed_direction_rejected(self) -> None:
+    def test_direction_mismatch_raises(self) -> None:
         obs = [
-            _obs(_TS, 100.0, direction=_IMPORT),
-            _obs(_TS + _M5, 100.0, direction=_EXPORT),
+            _obs(_TS, 100.0, direction=_EXPORT),
+            _obs(_TS + _H1, 100.0, direction=_EXPORT),
         ]
-        with pytest.raises(ValueError, match="mixed direction"):
+        with pytest.raises(ValueError, match=r"direction.*does not match series"):
             integrate_energy(
+                series=_SERIES_GRID_IMPORT,
                 observations=obs,
                 profile=_P,
                 period_start=_TS,
-                period_end=_TS + _M5,
+                period_end=_TS + _H1,
             )
 
-    def test_mixed_profile_version_rejected(self) -> None:
+    def test_no_default_series_identity(self) -> None:
+        with pytest.raises(TypeError, match="series"):
+            integrate_energy(
+                observations=[_obs(_TS, 100.0)],
+                profile=_P,
+                period_start=_TS,
+                period_end=_TS + _H1,
+            )
+
+
+# ---------------------------------------------------------------------------
+# Profile-version transition validation
+# ---------------------------------------------------------------------------
+
+
+class TestProfileVersionTransition:
+    def test_first_observation_non_normalized_second_v1(self) -> None:
         obs = [
-            _obs(_TS, 100.0, profile_version="1.0.0"),
-            _obs(_TS + _M5, 100.0, profile_version="2.0.0"),
+            _obs(_TS, power_w=None, status=NormalizationStatus.MISSING_VALUE),
+            _obs(_TS + _M5, 100.0, profile_version="1.0.0"),
+            _obs(_TS + _M10, 200.0, profile_version="2.0.0"),
         ]
         with pytest.raises(ValueError, match="mixed profile_version"):
             integrate_energy(
+                series=_SERIES_GRID_IMPORT,
+                observations=obs,
+                profile=_P,
+                period_start=_TS,
+                period_end=_TS + _M10,
+            )
+
+    def test_first_observation_non_normalized_second_v2_third_v1(self) -> None:
+        obs = [
+            _obs(_TS, power_w=None, status=NormalizationStatus.MISSING_VALUE),
+            _obs(_TS + _M5, 100.0, profile_version="2.0.0"),
+            _obs(_TS + _M10, 200.0, profile_version="1.0.0"),
+        ]
+        with pytest.raises(ValueError, match="mixed profile_version"):
+            integrate_energy(
+                series=_SERIES_GRID_IMPORT,
+                observations=obs,
+                profile=_P,
+                period_start=_TS,
+                period_end=_TS + _M10,
+            )
+
+    def test_reversed_order_still_raises_mixed_version(self) -> None:
+        obs = [
+            _obs(_TS, 200.0, profile_version="2.0.0"),
+            _obs(_TS + _M5, 100.0, profile_version="1.0.0"),
+        ]
+        with pytest.raises(ValueError, match="mixed profile_version"):
+            integrate_energy(
+                series=_SERIES_GRID_IMPORT,
                 observations=obs,
                 profile=_P,
                 period_start=_TS,
                 period_end=_TS + _M5,
             )
+
+    def test_single_profile_version_accepted(self) -> None:
+        obs = [
+            _obs(_TS, 100.0, profile_version="1.0.0"),
+            _obs(_TS + _M5, 200.0, profile_version="1.0.0"),
+        ]
+        result = integrate_energy(
+            series=_SERIES_GRID_IMPORT,
+            observations=obs,
+            profile=_P,
+            period_start=_TS,
+            period_end=_TS + _M5,
+        )
+        assert result.summary.sign_profile_version == "1.0.0"
+
+
+# ---------------------------------------------------------------------------
+# Synthetic timestamp removal — no from_normalized factory
+# ---------------------------------------------------------------------------
+
+
+class TestNoSyntheticTimestampFactory:
+    def test_no_from_normalized_in_public_api(self) -> None:
+        from solgreen.energy import integration as integration_module
+
+        assert not hasattr(integration_module, "from_normalized")
+        assert not hasattr(integration_module, "_UNSET")
+        assert not hasattr(integration_module, "_power_or_none")
+
+    def test_no_datetime_now_dependency(self) -> None:
+        with open("solgreen/energy/integration.py") as f:
+            source = f.read()
+        assert "datetime.now" not in source
+        assert "_UNSET" not in source
+
+    def test_no_local_timezone_sentinel(self) -> None:
+        with open("solgreen/energy/integration.py") as f:
+            source = f.read()
+        assert "astimezone()" not in source
 
 
 # ---------------------------------------------------------------------------
@@ -781,6 +1368,7 @@ class TestImmutability:
         ]
         obs_copy = list(obs)
         integrate_energy(
+            series=_SERIES_GRID_IMPORT,
             observations=obs,
             profile=_P,
             period_start=_TS,
@@ -794,6 +1382,7 @@ class TestImmutability:
             _obs(_TS + _H1, 100.0),
         ]
         result = integrate_energy(
+            series=_SERIES_GRID_IMPORT,
             observations=obs,
             profile=_P,
             period_start=_TS,
@@ -810,6 +1399,7 @@ class TestImmutability:
             _obs(_TS + _H1, 100.0, lineage=("step:2",)),
         ]
         result = integrate_energy(
+            series=_SERIES_GRID_IMPORT,
             observations=obs,
             profile=_P,
             period_start=_TS,
@@ -820,12 +1410,14 @@ class TestImmutability:
 
     def test_warnings_deterministic(self) -> None:
         result1 = integrate_energy(
+            series=_SERIES_GRID_IMPORT,
             observations=[],
             profile=_P,
             period_start=_TS,
             period_end=_TS + _H1,
         )
         result2 = integrate_energy(
+            series=_SERIES_GRID_IMPORT,
             observations=[],
             profile=_P,
             period_start=_TS,
@@ -867,11 +1459,17 @@ class TestAdditionalScenarios:
             PowerDirection.PV_GENERATION,
             PowerDirection.LOAD_CONSUMPTION,
         ):
+            series = EnergySeriesIdentity(
+                source_field=_GRID,
+                source_system=_SOLARMAN,
+                direction=direction,
+            )
             obs = [
                 _obs(_TS, 100.0, direction=direction),
                 _obs(_TS + _H1, 100.0, direction=direction),
             ]
             result = integrate_energy(
+                series=series,
                 observations=obs,
                 profile=_P,
                 period_start=_TS,
@@ -882,6 +1480,7 @@ class TestAdditionalScenarios:
     def test_period_end_equals_period_start_rejected(self) -> None:
         with pytest.raises(ValueError, match="period_end must be > period_start"):
             integrate_energy(
+                series=_SERIES_GRID_IMPORT,
                 observations=[_obs(_TS, 100.0)],
                 profile=_P,
                 period_start=_TS,
@@ -891,6 +1490,7 @@ class TestAdditionalScenarios:
     def test_naive_period_start_rejected(self) -> None:
         with pytest.raises(ValueError, match="timezone-aware"):
             integrate_energy(
+                series=_SERIES_GRID_IMPORT,
                 observations=[_obs(_TS, 100.0)],
                 profile=_P,
                 period_start=datetime(2026, 7, 24, 12, 0, 0),
@@ -905,6 +1505,7 @@ class TestAdditionalScenarios:
             _obs(ts_cat + _H1, 100.0),
         ]
         result = integrate_energy(
+            series=_SERIES_GRID_IMPORT,
             observations=obs,
             profile=_P,
             period_start=ts_cat,
@@ -919,6 +1520,7 @@ class TestAdditionalScenarios:
             _obs(_TS + _H1, 0.0),
         ]
         result = integrate_energy(
+            series=_SERIES_GRID_IMPORT,
             observations=obs,
             profile=_P,
             period_start=_TS,
@@ -931,6 +1533,7 @@ class TestAdditionalScenarios:
     def test_no_negative_energy_produced(self) -> None:
         obs = [_obs(_TS + i * _M5, max(0.0, 500.0 - 100.0 * i)) for i in range(13)]
         result = integrate_energy(
+            series=_SERIES_GRID_IMPORT,
             observations=obs,
             profile=_P,
             period_start=_TS,
@@ -954,6 +1557,7 @@ class TestFloatingPointPrecision:
             _obs(_TS + _H1, 0.2),
         ]
         result = integrate_energy(
+            series=_SERIES_GRID_IMPORT,
             observations=obs,
             profile=_P,
             period_start=_TS,
@@ -968,6 +1572,7 @@ class TestFloatingPointPrecision:
             _obs(_TS + _M5, 14999.0),
         ]
         result = integrate_energy(
+            series=_SERIES_GRID_IMPORT,
             observations=obs,
             profile=_P,
             period_start=_TS,
@@ -979,6 +1584,7 @@ class TestFloatingPointPrecision:
 
     def test_wh_kwh_zero_energy(self) -> None:
         result = integrate_energy(
+            series=_SERIES_GRID_IMPORT,
             observations=[],
             profile=_P,
             period_start=_TS,
@@ -1001,3 +1607,71 @@ class TestProfileGateAtCallTime:
     def test_unknown_profile_rejected_during_validation(self) -> None:
         with pytest.raises(ValueError, match=r"Only SampleSemantics\.INSTANTANEOUS"):
             _profile(sample_semantics=SampleSemantics.UNKNOWN)
+
+
+# ---------------------------------------------------------------------------
+# Duration partition reconciliation
+# ---------------------------------------------------------------------------
+
+
+class TestDurationPartitionReconciliation:
+    def test_complete_coverage_reconciles(self) -> None:
+        obs = [
+            _obs(_TS, 100.0),
+            _obs(_TS + _H1, 100.0),
+        ]
+        result = integrate_energy(
+            series=_SERIES_GRID_IMPORT,
+            observations=obs,
+            profile=_P,
+            period_start=_TS,
+            period_end=_TS + _H1,
+        )
+        s = result.summary
+        assert s.observed_duration + s.missing_duration + s.excluded_duration == s.expected_duration
+
+    def test_partial_coverage_reconciles(self) -> None:
+        p = _profile(max_authorized=_M5)
+        obs = [
+            _obs(_TS, 100.0),
+            _obs(_TS + _M10, 200.0),
+        ]
+        result = integrate_energy(
+            series=_SERIES_GRID_IMPORT,
+            observations=obs,
+            profile=p,
+            period_start=_TS,
+            period_end=_TS + _M10,
+        )
+        s = result.summary
+        assert s.observed_duration + s.missing_duration + s.excluded_duration == s.expected_duration
+
+    def test_leading_gap_reconciles(self) -> None:
+        obs = [
+            _obs(_TS + _M5, 100.0),
+            _obs(_TS + _M10, 200.0),
+        ]
+        result = integrate_energy(
+            series=_SERIES_GRID_IMPORT,
+            observations=obs,
+            profile=_P,
+            period_start=_TS,
+            period_end=_TS + _M10,
+        )
+        s = result.summary
+        assert s.observed_duration + s.missing_duration + s.excluded_duration == s.expected_duration
+
+    def test_trailing_gap_reconciles(self) -> None:
+        obs = [
+            _obs(_TS, 100.0),
+            _obs(_TS + _M5, 200.0),
+        ]
+        result = integrate_energy(
+            series=_SERIES_GRID_IMPORT,
+            observations=obs,
+            profile=_P,
+            period_start=_TS,
+            period_end=_TS + _M10,
+        )
+        s = result.summary
+        assert s.observed_duration + s.missing_duration + s.excluded_duration == s.expected_duration

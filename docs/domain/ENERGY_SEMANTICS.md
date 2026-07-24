@@ -254,6 +254,14 @@ When sign profiles are confirmed, power signals will be normalized into directio
 core for normalized directional power. The module is side-effect-free,
 has no I/O, and is not yet wired to the SOLARMAN sync runtime.
 
+### Explicit Series Identity
+
+`integrate_energy` requires an explicit `EnergySeriesIdentity` parameter
+consisting of `source_field`, `source_system`, and `direction`. The
+function validates that every observation matches the supplied identity.
+No identity is fabricated from the observation batch. Empty series preserve
+the supplied identity in the summary without fallback defaults.
+
 ### Supported Sample Semantics
 
 | Semantics | Value | Supported |
@@ -278,25 +286,22 @@ energy_wh = ((start_power_w + end_power_w) / 2.0) * duration_hours
 No rounding is applied inside the domain layer. Full floating-point precision
 is preserved.
 
-### Homogeneous-Series Invariant
+### Series-Identity Invariant
 
-One `integrate_energy` call processes exactly one homogeneous directional
-series. All usable observations must share:
+One `integrate_energy` call processes exactly one explicit directional
+series. All observations must match the supplied series identity
+(source field, source system, direction). Mismatches are rejected at
+the batch level. The caller is responsible for splitting heterogeneous
+batches before integration.
 
-- canonical source field;
-- source system;
-- normalized direction;
-- sign-profile version.
+### Profile-Version Transition Validation
 
-Mixed fields, sources, directions, or profile versions are rejected at the
-batch level. Integration does not cross sign-profile version transitions;
-the caller must split the series before integration.
-
-### Profile-Transition Policy
-
-If a sign-profile version changes within a time series, the caller must
-split the series at the transition point. `integrate_energy` rejects
-batches with mixed `profile_version` values on NORMALIZED observations.
+`integrate_energy` collects all non-null `profile_version` values from
+observations with `status = NORMALIZED`. If more than one distinct version
+exists, the batch is rejected with `mixed profile_version`. This check is
+independent of observation order and of whether the first observation is
+usable. The single normalized version, when present, becomes the summary's
+`sign_profile_version`. Integration does not cross a profile transition.
 
 ### Gap and Boundary Accounting
 
@@ -309,10 +314,10 @@ filtered from interval processing.
 - **Trailing boundary:** last in-window observation to `period_end` is
   `missing` duration.
 - **Intervals exceeding `maximum_authorized_interval`** are classified as
-  `missing` with `energy_wh=None`. No interpolation or constant-power
-  assumption is applied.
+  `MISSING` with `energy_wh=None`. The interval duration is added to
+  `missing_duration`. No interpolation or constant-power assumption is applied.
 - **Zero-duration intervals** (duplicate timestamps) are
-  `excluded_zero_duration` and add no duration.
+  `excluded_zero_duration` and add zero duration.
 - **Excluded intervals** (non-finite power, unconfirmed sign, etc.) are
   counted in `excluded_duration` with `energy_wh=None`.
 
@@ -320,11 +325,42 @@ Coverage is measured as `coverage_fraction = observed_duration / expected_durati
 (0 to 1). Missing energy is **unknown, not zero**. Observed energy is never
 scaled to estimate 100% coverage.
 
+### Duration Partition
+
+The three duration fields in `EnergySummary` partition the expected duration:
+
+```
+observed_duration + missing_duration + excluded_duration == expected_duration
+```
+
+All three must be non-negative, and `expected_duration` must be strictly
+positive and equal to `period_end - period_start`.
+
+### Counter Reconciliation
+
+`EnergySummary` maintains the invariant:
+
+```
+observed_interval_count + excluded_interval_count == interval_count
+```
+
+All counters are non-negative and each interval is classified exactly once
+(observed or excluded). Missing intervals (gaps exceeding `maximum_authorized_interval`)
+are counted in `excluded_interval_count` and their duration is tracked in
+`missing_duration`.
+
 ### Empty and Single-Observation Behavior
 
 - Empty series: zero energy, zero coverage, full period counted as missing.
+  The summary preserves the supplied `EnergySeriesIdentity` without fabrication.
 - Single observation: zero energy, zero coverage (no valid power interval
   exists). No extrapolation from a single point.
+
+### No Runtime Normalization Factory
+
+U2.2a does not include a `from_normalized()` factory or any mechanism to
+derive observations from SOLARMAN sync results. The runtime adapter
+(`from_normalized` or equivalent) is deferred to U2.2b.
 
 ---
 
@@ -364,6 +400,20 @@ Future energy results must separate:
 ---
 
 ## Implemented Energy Result Models (U2.2a)
+
+### EnergySeriesIdentity (`solgreen/energy/integration.py`)
+
+Frozen Pydantic model carrying the explicit identity of a directional power
+series. Required by `integrate_energy`. Every observation in the batch must
+match this identity.
+
+| Field | Type | Description |
+|---|---|---|
+| `source_field` | CanonicalPowerField | Canonical field (e.g. FLOW_GRID) |
+| `source_system` | SourceSystem | Data origin (e.g. SOLARMAN_PLANT_FLOW) |
+| `direction` | PowerDirection | Directional category (grid_import, grid_export, etc.) |
+
+No default or fallback identity is fabricated for empty series.
 
 ### DirectionalPowerObservation (`solgreen/energy/integration.py`)
 
@@ -423,7 +473,7 @@ Frozen Pydantic model aggregating all intervals within a period.
 | `coverage_fraction` | float | observed_duration / expected_duration |
 | `interval_count` | int | Total intervals processed |
 | `observed_interval_count` | int | Valid observed intervals |
-| `excluded_interval_count` | int | Intervals excluded |
+| `excluded_interval_count` | int | Intervals excluded (including MISSING gaps); observed + excluded = interval_count |
 | `sign_profile_version` | str or None | Active PowerSignProfile version |
 | `warnings` | tuple[str, ...] | Deterministic coverage/quality warnings |
 

@@ -3,7 +3,7 @@
 **Date:** 2026-07-24
 **Loop:** U2.2a — Temporal integration core for normalized directional power
 **Branch:** `feat/u2-2-temporal-integration`
-**PR:** #31
+**PR:** #32
 
 ## Goal
 
@@ -21,10 +21,11 @@ using an explicit instantaneous-sample contract and trapezoidal integration.
 | `IntegrationMethod` | StrEnum | `trapezoidal` |
 | `IntegrationProfile` | BaseModel (frozen) | Profile version, semantics, method, intervals |
 | `IntervalStatus` | StrEnum | `observed`, `missing`, `excluded_nonfinite`, `excluded_zero_duration`, `excluded_unconfirmed_sign`, `not_applicable` |
+| `EnergySeriesIdentity` | BaseModel (frozen) | Explicit series identity (source_field, source_system, direction) |
 | `DirectionalPowerObservation` | BaseModel (frozen) | Timestamped directional power observation |
 | `EnergyInterval` | BaseModel (frozen) | Interval between two consecutive observations |
-| `EnergySummary` | BaseModel (frozen) | Aggregated period summary |
-| `IntegrationResult` | BaseModel (frozen) | Immutable (intervals, summary) container |
+| `EnergySummary` | BaseModel (frozen) | Aggregated period summary with strengthened validators |
+| `IntegrationResult` | BaseModel (frozen) | Immutable (intervals, summary) container with cross-validation |
 | `integrate_energy()` | Pure function | Main integration entry point |
 
 ## Formulas
@@ -78,17 +79,22 @@ Semantics are never inferred from source names in the pure domain layer.
 
 ## Test Evidence
 
-61 focused unit tests in `tests/unit/test_energy/test_integration.py`:
+100 focused unit tests in `tests/unit/test_energy/test_integration.py`:
 
 - Model validation: naive timestamp, non-finite/negative power, missing profile version, invalid direction, frozen immutability.
 - Integration behavior: constant 1000W/1h = 1000Wh, linear ramp 0→1000W/1h = 500Wh, zero power = 0Wh observed, irregular authorized interval, multiple interval accumulation, Wh/kWh conversion.
 - Gap policy: exceeded max_authorized → missing, leading/trailing boundaries → missing, observations outside period filtered.
 - Edge cases: empty series, single observation, duplicate timestamps, out-of-order rejection, coverage never scales energy.
 - Excluded intervals: missing endpoint → excluded_nonfinite, unconfirmed sign → excluded_unconfirmed_sign, both non-finite → excluded.
-- Homogeneous-series: mixed source field, source system, direction, and profile version all rejected.
+- Series identity: source-field mismatch, source-system mismatch, direction mismatch, no default identity.
+- Profile-version transitions: first non-normalized + second v1 + third v2 raises; reversed order still raises; single version accepted.
+- No synthetic timestamp: no `from_normalized()` in public API, no `datetime.now`, no `astimezone()` sentinel, no `_UNSET`.
+- Strengthened EnergySummary validators: naive period timestamps, reversed/zero period, incorrect expected duration, negative durations, duration partition mismatch, negative counters, counter reconciliation, NaN/Inf Wh, NaN/Inf kWh, NaN/infinite coverage, coverage mismatch.
+- Strengthened IntegrationResult validators: wrong interval count, wrong observed count, wrong energy total.
 - Immutability: input order preserved, returned models frozen, lineage stable, warnings deterministic.
 - Six valid directions all integrate correctly.
 - Floating-point precision preserved.
+- Duration partition reconciliation on complete, partial, leading-gap, and trailing-gap scenarios.
 
 ## Pre-existing Test Failure
 
@@ -98,7 +104,7 @@ This is not caused by U2.2a changes.
 
 ## Coverage
 
-Integration module: 87% (45 misses in uncovered branches including error paths and `from_normalized` factory method).
+Integration module: 94%+ (uncovered branches are error paths and boundary cases).
 
 Overall project: 73% (depressed by `* 2.py` backup files at 0% coverage and `db/*` omitted from coverage configuration).
 
