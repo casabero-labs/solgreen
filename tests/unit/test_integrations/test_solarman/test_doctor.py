@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from click import unstyle
 from typer.testing import CliRunner
 
 from solgreen.cli import app
@@ -10,6 +11,12 @@ from solgreen.integrations.solarman.doctor import (
 )
 
 runner = CliRunner()
+
+
+def _plain_help(args: list[str]) -> str:
+    result = runner.invoke(app, [*args, "--help"], color=False)
+    assert result.exit_code == 0, result.output
+    return unstyle(result.stdout)
 
 
 class TestDoctorCheck:
@@ -63,18 +70,15 @@ class TestDoctorCli:
         assert "doctor" in result.stdout.lower()
 
     def test_doctor_help_shows_station_id_option(self) -> None:
-        result = runner.invoke(app, ["solarman", "doctor", "--help"])
-        assert result.exit_code == 0
-        assert "--station-id" in result.stdout
+        output = _plain_help(["solarman", "doctor"])
+        assert "--station-id" in output
 
     def test_doctor_help_shows_json_option(self) -> None:
-        result = runner.invoke(app, ["solarman", "doctor", "--help"])
-        assert result.exit_code == 0
-        assert "--json" in result.stdout
+        output = _plain_help(["solarman", "doctor"])
+        assert "--json" in output
 
     def test_doctor_help_no_secrets(self) -> None:
-        result = runner.invoke(app, ["solarman", "doctor", "--help"])
-        output_lower = result.stdout.lower()
+        output_lower = _plain_help(["solarman", "doctor"]).lower()
         assert "token" not in output_lower
         assert "password" not in output_lower
         assert "secret" not in output_lower

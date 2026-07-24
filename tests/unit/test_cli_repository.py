@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+from click import unstyle
 from typer.testing import CliRunner
 
 from solgreen.cli import (
@@ -26,6 +27,12 @@ from solgreen.timeline.episode import CanonicalEpisode
 
 FIXTURES_DIR = Path(__file__).resolve().parent.parent / "fixtures"
 runner = CliRunner()
+
+
+def _plain_help(args: list[str]) -> str:
+    result = runner.invoke(app, [*args, "--help"], color=False)
+    assert result.exit_code == 0, result.output
+    return unstyle(result.stdout)
 
 
 class MockRepository(Repository):
@@ -447,13 +454,12 @@ class TestDbMigrateCommand:
         assert "migrate" in result.stdout.lower()
 
     def test_db_migrate_help_shows_options(self) -> None:
-        result = runner.invoke(app, ["db", "migrate", "--help"])
-        assert result.exit_code == 0
-        assert "--db-url" in result.stdout
-        assert "--migrations-dir" in result.stdout
-        assert "--to" in result.stdout
-        assert "--dry-run" in result.stdout
-        assert "--json" in result.stdout
+        output = _plain_help(["db", "migrate"])
+        assert "--db-url" in output
+        assert "--migrations-dir" in output
+        assert "--to" in output
+        assert "--dry-run" in output
+        assert "--json" in output
 
     def test_db_migrate_json_no_db_url_error(self) -> None:
         result = runner.invoke(app, ["db", "migrate", "--json"])
@@ -467,11 +473,10 @@ class TestDbStatusCommand:
         assert "status" in result.stdout.lower()
 
     def test_db_status_help_shows_options(self) -> None:
-        result = runner.invoke(app, ["db", "status", "--help"])
-        assert result.exit_code == 0
-        assert "--db-url" in result.stdout
-        assert "--migrations-dir" in result.stdout
-        assert "--json" in result.stdout
+        output = _plain_help(["db", "status"])
+        assert "--db-url" in output
+        assert "--migrations-dir" in output
+        assert "--json" in output
 
     def test_db_status_json_no_db_url_error(self) -> None:
         result = runner.invoke(app, ["db", "status", "--json"])
