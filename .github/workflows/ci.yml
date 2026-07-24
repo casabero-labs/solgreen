@@ -4,7 +4,10 @@ on:
   push:
     branches: ['**']
   pull_request:
-    branches: [main]
+    branches:
+      - main
+      - develop/solgreen-unified
+  workflow_dispatch:
 
 jobs:
   documentation:
@@ -108,7 +111,26 @@ jobs:
           retention-days: 7
 
       - name: Tests with coverage
-        run: uv run pytest --cov=solgreen --cov-fail-under=80
+        shell: bash
+        run: |
+          set -o pipefail
+          uv run pytest \
+            --cov=solgreen \
+            --cov-report=term-missing \
+            --cov-report=xml:coverage.xml \
+            --cov-fail-under=80 \
+            | tee pytest-coverage.txt
+
+      - name: Upload coverage diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-coverage
+          path: |
+            pytest-coverage.txt
+            coverage.xml
+          if-no-files-found: ignore
+          retention-days: 7
 
   frontend:
     name: Frontend Typecheck + Tests + Build
