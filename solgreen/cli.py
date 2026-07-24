@@ -1075,7 +1075,7 @@ def solarman_sync(
         if result.devices_queried == 0 or result.devices_succeeded == 0:
             status = "FAILED"
             exit_code = 1
-        elif result.errors or result.not_confirmed_count > 0:
+        elif result.errors or result.not_confirmed_count > 0 or result.energy_series_failed > 0:
             status = "PARTIAL_SUCCESS"
             exit_code = 0
         else:
@@ -1145,19 +1145,13 @@ def _sync_success(
         sanitized_errors = [sanitize_error(str(error)) for error in result.errors[:10]]
         output["errors"] = sanitized_errors
 
-    energy_result = getattr(result, "energy_result", None)
-    if energy_result is not None and energy_result.enabled:
+    if result.energy_series_attempted > 0:
         output["energy_integration"] = {
             "enabled": True,
-            "profile_version": energy_result.profile_version,
-            "series_attempted": energy_result.series_attempted,
-            "series_succeeded": energy_result.series_succeeded,
-            "series_failed": energy_result.series_failed,
-            "results_persisted": energy_result.results_persisted,
+            "series_attempted": result.energy_series_attempted,
+            "series_succeeded": result.energy_series_succeeded,
+            "series_failed": result.energy_series_failed,
         }
-    elif energy_result is None or not energy_result.enabled:
-        output["energy_integrated"] = False
-        output["energy_series_count"] = 0
 
     if json_output:
         typer.echo(json.dumps(output))
@@ -1173,13 +1167,11 @@ def _sync_success(
         typer.echo(f"Not confirmed: {result.not_confirmed_count}")
         typer.echo(f"Not found: {result.not_found_count}")
         typer.echo(f"Error count: {result.error_count}")
-        if energy_result is not None and energy_result.enabled:
+        if result.energy_series_attempted > 0:
             typer.echo(
-                f"Energy integration: enabled "
-                f"({energy_result.series_succeeded}/{energy_result.series_attempted} series succeeded)"
+                f"Energy integration: "
+                f"{result.energy_series_succeeded}/{result.energy_series_attempted} series succeeded"
             )
-        else:
-            typer.echo("Energy integration: disabled")
         if result.errors:
             typer.echo(f"Errors: {len(result.errors)}")
             for err in sanitized_errors[:5]:
