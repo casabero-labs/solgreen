@@ -79,7 +79,10 @@ npm run build
 | R0 | Reconciliar baseline y safety gates | CI y auditoría | estado documental coincide con código | CLOSED |
 | U0 | Integrar economía y frontend Showcase Ink | TS, Vitest, build, docs | primera vertical ejecutable y honesta | TECHNICALLY_VERIFIED_HUMAN_GATE |
 | U1 | Calidad avanzada y semántica | fixtures y tests | cero, status, plausibilidad, consistencia y safety gates | ENGINEERING_CLOSED |
-| U2 | Energía y métricas físicas | fórmulas y golden manuales | W→kWh y balance reproducibles | DISCOVERY_COMPLETE_HUMAN_GATE_PENDING |
+| U2.0 | Energy semantics discovery | inventario y docs | semántica energética documentada | DISCOVERY_COMPLETE_HUMAN_GATE_PENDING |
+| U2.1 | PowerSignProfile + normalización direccional | seeds y tests | contratos direccionales implementados | ENGINEERING_CLOSED |
+| U2.2a | Temporal integration core | integración trapezoidal y tests | W→Wh con sample semantics explícito | ENGINEERING_CLOSED |
+| U2.2b | Source-profile selection y runtime wiring | pipe SOLARMAN→integrate | scheduling pendiente, no billing | PLANNED |
 | U3 | Eventos, reglas y evidencia | golden 17/19 | eventos científicos y reglas reales | PLANNED |
 | U4 | Frontend conectado | Playwright Human-First | carga, timeline y episodios utilizables | PLANNED |
 | U5 | Afinia, cargas y escenarios | golden billing | factura y horarios reproducibles | FOUNDATION_ABSORBED |
@@ -102,14 +105,6 @@ npm run build
 Determinar y documentar la semántica energética completa antes de implementar
 cualquier cálculo W→Wh.
 
-### Context
-
-- U1 ENGINEERING_CLOSED con 442 tests, 90.78% cobertura.
-- CanonicalSample contiene 7 campos de potencia en W sin signos normalizados.
-- FOUNDATIONS.md declara convenciones canónicas direccionales pero sin implementación.
-- No existe perfil de signos versionado.
-- No se conoce la semántica temporal de las muestras (instantánea vs promedio).
-
 ### Actions ejecutadas
 
 1. Inventario completo de señales energéticas (potencia, energía) con 23+ señales.
@@ -117,35 +112,11 @@ cualquier cálculo W→Wh.
 3. Matriz de convención de signos con estados confirmed/provisional/unknown.
 4. Jerarquía de autoridad: fiscal (medidor Afinia) vs operacional (SolarMAN/inversor).
 5. Diseño conceptual de PowerSignProfile (perfil de signos versionado).
-6. Diseño conceptual de normalización direccional (grid_import_w, grid_export_w, battery_charge_w, battery_discharge_w).
+6. Diseño conceptual de normalización direccional.
 7. Diseño conceptual de integración temporal W→Wh.
 8. Política de gaps: no interpolar, estados explícitos, cobertura como fracción.
 9. Contratos conceptuales: EnergyInterval, EnergySummary.
-10. Precondiciones para balances físicos.
-11. Procedimiento de human gates para confirmación de signos.
-12. Plan de implementación U2.1–U2.7.
-
-### Feedback
-
-- Ruff + mypy + pytest + cobertura ≥ 80%.
-- Frontend npm ci + typecheck + test + build.
-- Verificación de afirmaciones inseguras con `rg`.
-- Documentación canónica verificada.
-
-### Stop condition cumplida
-
-- Inventario completo de señales energéticas documentado.
-- AC/DC y puntos físicos documentados.
-- Autoridad fiscal y operativa separadas.
-- Signos conocidos y desconocidos explícitos.
-- Ningún signo normalizado sin perfil.
-- Ningún cálculo de energía realizado.
-- Política de gaps y cobertura definida.
-- Contrato de integración temporal propuesto.
-- ADR-008 permanece Proposed.
-- Plan U2.1–U2.7 definido.
-- CI verde, PR draft.
-- Sin cambios productivos.
+10. ADR-008 y ADR-009 aceptados.
 
 ### Human gates pendientes
 
@@ -154,89 +125,67 @@ cualquier cálculo W→Wh.
 - Semántica temporal de las muestras.
 - Puntos físicos de medición (CT, BMS, cableado).
 
-### Rollback
+## U2.1 — PowerSignProfile and directional normalization
 
-Revertir commit documental. Sin cambios productivos.
+### Goal
 
-### Próximo loop exacto
+Implementar contratos versionados de signos y normalización direccional.
 
-U2.1 — PowerSignProfile contract y normalización direccional, bloqueado
-hasta confirmación de signos mediante human gates.
+### Entregables
 
-## Loop cerrado
+- PowerSignProfile con per-direction evidence status (ADR-009).
+- PowerSignProfileRegistry con seeds de producción y telemetría.
+- DirectionalPowerResult con validación de invariantes.
+- normalize_power_value con gate direccional.
+- D1.0 proposal registry.
 
-# U1 — Calidad, semántica y safety gates
+### Estado: ENGINEERING_CLOSED
 
-## Goal
+PR #27 merged. 1260 tests. CI verde. D10 proposal permanece disabled hasta
+que el operador autorice el effective_from.
 
-Garantizar que los datos canónicos tengan una semántica correcta, calidad
-físicamente razonable y safety gates operativos antes de calcular energía,
-detectar eventos o conectar datos reales al frontend.
+## U2.2a — Temporal integration core
 
-## Context
+### Goal
 
-- U0 técnicamente verificado (human gate pendiente).
-- `_pv_power` perdía cero medido; estado textual se troncaba a None en merged.
-- `compute_quality_score(total_rows=0)` devolvía 1.0.
-- `_parse_iso_duration` roto (#24).
-- `_evaluate_rules` activaba reglas por presencia de señales.
-- Formato global sin normalizar (#25).
+Convertir observaciones direccionales normalizadas non-negativas en energía
+integrada (Wh) usando contrato instantaneous-sample explícito e integración
+trapezoidal.
 
-## Actions ejecutadas
+### Entregables
 
-1. U1.1: semántica de cero y estado (get_text, _pv_power fix, calidad temporal).
-2. U1.2: QualityDimensions aditivas, cobertura temporal por duración, lote vacío→0.
-3. U1.3: plausibilidad universal (NaN, SOC, temperatura absoluta) + perfil.
-4. U1.3.1: contabilidad passed/failed/evaluated con invariante Pydantic.
-5. U1.4.0: corrección de telemetry_grid_power_w e inverter_state en telemetry-only.
-6. U1.4: consistencia entre fuentes basada en perfil (solo SOC probado).
-7. U1.5.0–a: parser ISO puro, validación antes de side effects, CLI tests.
-8. U1.5.1: ruff format global, CI gate global.
-9. U1.5.2: package-lock.json versionado, npm ci en CI.
-10. U1.6: estados de reglas (not_evaluable/evaluated_not_fired/fired), gate LLM.
+- `DirectionalPowerObservation`: modelo frozen con timestamp tz-aware,
+  canonical source, source system, direction, power_w ≥ 0 o None,
+  profile_version para observaciones NORMALIZED.
+- `IntegrationProfile`: semantics=instantaneous, method=trapezoidal,
+  expected_interval, maximum_authorized_interval.
+- `EnergyInterval`: intervalo con status (observed/missing/excluded_*),
+  energy_wh nullable, invariantes de consistency.
+- `EnergySummary`: observed_energy_wh/kWh, cobertura, contadores.
+- `IntegrationResult`: (intervals, summary) immutable.
+- `integrate_energy()`: función pura sin I/O, sin side effects.
+- Política de gaps: missing, excluded_nonfinite, excluded_zero_duration,
+  excluded_unconfirmed_sign.
+- Boundary accounting: leading/trailing gaps cuentan como missing.
+- Homogeneous-series invariant: rechaza campos, fuentes, direcciones
+  o profile versions mixtos.
+- Profile-transition policy: no integrar a través de transiciones de
+  versión de signo.
+- Coverage nunca escala energía. Missing energy es unknown, no zero.
 
-## Feedback
+### Estado: ENGINEERING_CLOSED
 
-- Ruff + mypy + pytest + cobertura ≥ 80%.
-- Frontend npm ci + typecheck + test + build.
-- 442 tests, 90.78% cobertura.
-- CI push #123 y PR #124 verdes.
-- Gate global de formato.
-- Zero RuleExecution falsas.
-- LLM omitido sin evidencia.
-- Documentación reconciliada.
+61 tests unitarios. Ruff, mypy, frontend gates limpios. PR #31.
 
-## Stop condition cumplida
+## U2.2b — Source-profile selection and runtime wiring
 
-- Cero medido preservado en todas las rutas.
-- Estados textuales sobreviven al join.
-- Lote vacío no obtiene score perfecto.
-- Huecos ponderados por duración.
-- Plausibilidad física con tests positivos y negativos.
-- Límites desde perfiles (o not_configured).
-- Consistencia entre fuentes produce evidencia estructurada.
-- Parser ISO corregido (#24).
-- Formato global normalizado (#25).
-- Ruff, format, mypy, pytest green; cobertura 90.78%.
-- Seed rules not_evaluable; 0 RuleExecution falsas.
-- LLM no invocado sin evidencia.
-- CI completa verde.
-- Documentación reconciliada.
+### Planned
 
-## Human gates pendientes
+Seleccionar `IntegrationProfile` concreto para fuentes SOLARMAN.
+Conectar `integrate_energy` al pipeline de sync. Sin billing, tarifas,
+frontend ni reportes.
 
-- Revisión visual y funcional U0.
-- Signos reales de red y batería.
-- Perfiles de plausibilidad y consistencia para Casabero.
-- Límites técnicos de equipos.
-- Algoritmos y umbrales de reglas U3.
-- Golden cases.
-- Merge a main.
+### Dependencies
 
-## Rollback
+U2.2a complete.
 
-Revertir commits U1 en `develop/solgreen-unified`. Main conserva R0 + U0.
-
-## Próximo loop exacto
-
-U2: energía, métricas físicas y signos.

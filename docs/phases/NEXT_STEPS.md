@@ -3,19 +3,19 @@
 ## Baseline estable
 
 - Rama: `main`
-- SHA de reconciliación R0: `1f70674f0a0d835c8933dc23f38f46f798a6facb`
+- SHA de reconciliación: `5cfb9fbb803da1f46d7ac50297c30b1fa96f3ff8`
 - Auditoría: [`../qa_reports/DEVELOPMENT_AUDIT_2026-07-20.md`](../qa_reports/DEVELOPMENT_AUDIT_2026-07-20.md)
 
 ## Línea activa
 
 - Rama: `develop/solgreen-unified`
 - Epic: #26
-- Pull request único: #27
+- Pull request activo: #31 (U2.2a temporal integration)
 - Política: un solo PR activo contra `main`
 - Roadmap: [`UNIFIED_DEVELOPMENT_LINE.md`](UNIFIED_DEVELOPMENT_LINE.md)
 - QA report U1: [`../qa_reports/U1_DATA_QUALITY_RESULTS_2026-07-21.md`](../qa_reports/U1_DATA_QUALITY_RESULTS_2026-07-21.md)
 
-El PR económico #8 fue cerrado como supersedido. Su fundación E0 fue absorbida en esta línea y no continúa como pista separada.
+El PR económico #8 fue cerrado como supersedido. Su fundación E0 fue absorbida en esta línea y no continúa como pista separada. El PR #27 (línea unificada) fue mergeado a `main`.
 
 ## Estado U0
 
@@ -64,7 +64,6 @@ npm run build
 
 ### Pendiente o bloqueado
 
-- motor de energía W→Wh/kWh (U2);
 - eventos científicos y evaluadores determinísticos (U3);
 - golden cases privados;
 - endpoints de frontend;
@@ -73,22 +72,33 @@ npm run build
 - PDF y deploy verificable.
 
 El issue #21 permanece abierto para detección científica de eventos (U3).
-Los issues #24 y #25 están resueltos en la rama; pendientes de merge a main.
+Los issues #24 y #25 están resueltos.
 El issue #20 sigue abierto para evaluadores U3.
+
+## Estado U2.1 — ENGINEERING COMPLETE (PR #27, merged)
+
+- PowerSignProfile con per-direction evidence status (ADR-009).
+- Normalización direccional implementada (grid_import, grid_export, battery_charge, battery_discharge, pv_generation, load_consumption).
+- Profile registry con seeds de producción y telemetría.
+- SOLARMAN operational sync implementado.
+- CI corre en PRs a `main` y `develop/solgreen-unified`.
+
+## Estado U2.2a — ACTIVE (PR #31)
+
+- `solgreen/energy/integration.py`: `DirectionalPowerObservation`, `IntegrationProfile`, `EnergyInterval`, `EnergySummary`, `IntegrationResult`.
+- Integración trapezoidal W→Wh para series homogéneas direccionales.
+- Sample semantics `instantaneous` como único soportado.
+- Política de gaps explícita: missing, excluded_nonfinite, excluded_zero_duration, excluded_unconfirmed_sign.
+- Boundary accounting: leading y trailing gaps cuentan como missing.
 
 ## Próximo paso exacto
 
-**U2.0** — DISCOVERY_COMPLETE_HUMAN_GATE_PENDING.
+**U2.2b** — source-profile selection y runtime wiring.
+Seleccionar el IntegrationProfile concreto para cada fuente SOLARMAN,
+conectar `integrate_energy` al pipeline de sync, sin billing, sin tarifas,
+sin frontend.
 
-La semántica energética, la jerarquía de autoridad, los perfiles de signo
-y los contratos de integración están documentados. La implementación de
-U2.1 (normalización direccional) está bloqueada hasta que los human gates
-confirmen signos de red y batería con evidencia privada.
-
-Evidencia U2.0:
-- [`../docs/domain/ENERGY_SEMANTICS.md`](../docs/domain/ENERGY_SEMANTICS.md)
-- [`../docs/decisions/ADR-008-energy-integration-and-sign-profiles.md`](../docs/decisions/ADR-008-energy-integration-and-sign-profiles.md)
-- [`../docs/qa_reports/U2_ENERGY_DISCOVERY_2026-07-21.md`](../docs/qa_reports/U2_ENERGY_DISCOVERY_2026-07-21.md)
-
-Próximo loop exacto: **U2.1** — PowerSignProfile + normalización direccional.
-Depende de human gates: confirmación de signo de red y signo de batería.
+Evidencia U2.2a:
+- [`solgreen/energy/integration.py`](../../solgreen/energy/integration.py)
+- [`tests/unit/test_energy/test_integration.py`](../../tests/unit/test_energy/test_integration.py)
+- [`docs/qa_reports/U2_2A_TEMPORAL_INTEGRATION_RESULTS_2026-07-24.md`](../qa_reports/U2_2A_TEMPORAL_INTEGRATION_RESULTS_2026-07-24.md)
